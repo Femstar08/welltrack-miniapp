@@ -28,8 +28,9 @@ main.m-body > section > .m-sub { margin-top: calc(var(--space-4) * -1 + 2px); }
 .m-sect { margin: var(--space-2) 0 calc(var(--space-2) * -1); }
 
 details.m-nest-d { margin-top: var(--space-2) }
-details.m-nest-d > summary { cursor: pointer; color: var(--accent); min-height: 32px;
-  display: flex; align-items: center }
+details.m-nest-d > summary { cursor: pointer; color: var(--accent); display: block;
+  padding: 7px 0; min-height: 32px }
+details.m-nest-d > summary .unit { display: block; color: var(--ink-muted); margin-top: 1px }
 .m-detail { padding: var(--space-3) var(--space-4) var(--space-4);
   border-top: 1px solid var(--border-subtle); background: var(--surface-card) }
 .m-detail ul, .m-detail ol { margin: var(--space-2) 0 0; padding-left: 20px }
@@ -43,6 +44,43 @@ details.m-nest-d > summary { cursor: pointer; color: var(--accent); min-height: 
 .m-sheet-wrap .m-sheet { position: relative; max-height: 78vh; overflow-y: auto;
   width: 100%; max-width: 480px; margin: 0 auto }
 .m-sheet-wrap .m-scrim { position: fixed }
+
+/* a panel behind a tab — same rhythm as a view */
+.m-panel { display: flex; flex-direction: column; gap: var(--space-4) }
+
+/* a segmented control with more entries than fit across 390px */
+.m-seg--scroll { overflow-x: auto; scrollbar-width: none; -ms-overflow-style: none }
+.m-seg--scroll::-webkit-scrollbar { display: none }
+.m-seg--scroll button { flex: 0 0 auto; padding: 0 var(--space-3); white-space: nowrap }
+.m-seg button .m-seg__n { margin-left: 5px; opacity: .6 }
+
+/* recipe card header — the whole card used to be the tap target, which meant
+   anything tapped inside the open body closed it again */
+.m-recipe__head { display: flex; flex-direction: column; gap: var(--space-2); width: 100%;
+  padding: 0; border: 0; background: transparent; color: inherit; font-family: inherit;
+  text-align: left; cursor: pointer }
+.m-recipe__head:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 4px }
+.m-recipe__chev { transition: transform .15s; color: var(--ink-muted); flex: none }
+.m-recipe__head[aria-expanded="true"] .m-recipe__chev { transform: rotate(180deg) }
+
+/* prep blocks inside the batch cook card */
+.m-block { display: block }
+.m-block > .title-sm { display: block }
+.m-prepbox { background: var(--surface-inset); border-radius: var(--radius-md);
+  padding: var(--space-3); margin-bottom: var(--space-3) }
+.m-prepbox ul { margin: var(--space-2) 0 0; padding-left: 19px }
+.m-prepbox li { margin-bottom: var(--space-1) }
+.m-subitem { padding: var(--space-2) 0; border-top: 1px solid var(--border-subtle) }
+.m-subitem:first-of-type { border-top: 0 }
+.m-jar--todo { border: 1px solid var(--warn) }
+
+/* "BREAKFAST" does not fit the design's 58px slot column and was overrunning
+   the meal name beside it */
+.m-day__slot { width: 78px; white-space: nowrap }
+
+/* an expanded meal sits inside the day card, so it keeps the card's gutter */
+.slotdetail { padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--border-subtle) }
 </style>
 </head>
 <body>
@@ -64,14 +102,23 @@ details.m-nest-d > summary { cursor: pointer; color: var(--accent); min-height: 
   <section id="view-plan" hidden>
     <div class="m-head"><h1 class="display-md">Meal plan</h1></div>
     <p class="m-sub caption" id="plan-sub">What's coming up</p>
-    <div class="m-seg" id="plan-range" role="tablist">
-      <button class="caption-strong" role="tab" data-days="7" aria-selected="true">This week</button>
-      <button class="caption-strong" role="tab" data-days="14" aria-selected="false">Two weeks</button>
+    <div class="m-seg" id="plan-tabs" role="tablist">
+      <button class="caption-strong" role="tab" data-panel="days" aria-selected="true">The days</button>
+      <button class="caption-strong" role="tab" data-panel="prep" aria-selected="false">Meal prep</button>
     </div>
-    <h2 class="m-sect label m-up">Batch cook</h2>
-    <div id="batch-sessions" class="m-col"></div>
-    <h2 class="m-sect label m-up">The days</h2>
-    <div id="plan-days" class="m-col"></div>
+
+    <div class="m-panel" id="plan-panel-days">
+      <div class="m-seg" id="plan-range" role="tablist">
+        <button class="caption-strong" role="tab" data-days="7" aria-selected="true">This week</button>
+        <button class="caption-strong" role="tab" data-days="14" aria-selected="false">Two weeks</button>
+      </div>
+      <div id="plan-days" class="m-col"></div>
+    </div>
+
+    <div class="m-panel" id="plan-panel-prep" hidden>
+      <div class="m-seg m-seg--scroll" id="batch-tabs" role="tablist"></div>
+      <div id="batch-sessions" class="m-col"></div>
+    </div>
   </section>
 
   <section id="view-progress" hidden>
@@ -89,6 +136,8 @@ details.m-nest-d > summary { cursor: pointer; color: var(--accent); min-height: 
       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
       <input type="search" id="recipe-search" placeholder="Name, cuisine or tag" autocomplete="off" aria-label="Search recipes" />
     </label>
+    <div class="m-seg m-seg--scroll" id="recipe-tabs" role="tablist"></div>
+    <p class="m-sub caption" id="recipe-sub" hidden></p>
     <div id="recipe-list" class="m-col"></div>
   </section>
 
@@ -499,8 +548,8 @@ function recipeDetail(recipe, portion = 1) {
     ${ingredientList(recipe, portion)}
     ${methodList(recipe)}
     ${marinades.map((m) => `
-      <details class="sub-recipe">
-        <summary>${esc(m.title)} — how to make it</summary>
+      <details class="m-nest-d">
+        <summary class="caption-strong">${esc(m.title)} — how to make it</summary>
         ${ingredientList(m, 1)}
         ${methodList(m)}
         <p class="caption m-muted" style="margin:8px 0 0">Makes ${m.servings} tbsp. Keeps in a jar in the fridge,
@@ -725,14 +774,20 @@ function dayLabel(iso) {
 
 /* --- batch cook ---------------------------------------------------------- */
 
+/** Which cook session the Meal prep tab is showing. Survives a re-render, so
+    an edit on the days tab doesn't throw the selection back to the first one. */
+let batchTab = 0;
+
 async function renderBatch() {
   const host = el('batch-sessions');
+  const tabs = el('batch-tabs');
   host.innerHTML = '<p class="caption m-muted">Working out the cook sessions…</p>';
 
   let upcomingSessions;
   try {
     ({ upcomingSessions } = await import('./batchplan.js'));
   } catch {
+    tabs.innerHTML = '';
     host.innerHTML = '<p class="caption m-muted">Batch planning unavailable.</p>';
     return;
   }
@@ -746,60 +801,82 @@ async function renderBatch() {
 
   const sessions = upcomingSessions(recipes, rows, todayISO(), 2, jars);
 
-  host.innerHTML = sessions.map((s) => {
+  if (!sessions.length) {
+    tabs.innerHTML = '';
+    host.innerHTML = '<p class="caption m-muted">No cook sessions in the next fortnight.</p>';
+    return;
+  }
+
+  if (batchTab >= sessions.length) batchTab = 0;
+
+  // The nearest session is whichever comes first — on a Monday that is
+  // Wednesday's, not Sunday's — so the tabs are named from the sessions
+  // themselves rather than hard-coded.
+  tabs.innerHTML = sessions.map((s, i) => {
+    const name = s.session.label.replace(/\s*(batch\s*)?cook$/i, '');
+    const when = dayLabel(s.cookDate);
+    // "Sunday · Tomorrow" is worth saying; "Wednesday · Wed 28 Oct" is not.
+    const stamp = when.toLowerCase().startsWith(name.slice(0, 3).toLowerCase()) ? '' : when;
+    return `<button class="caption-strong" role="tab" data-i="${i}" aria-selected="${i === batchTab}">
+      ${esc(name)}${stamp ? `<span class="m-seg__n">${esc(stamp)}</span>` : ''}
+    </button>`;
+  }).join('');
+
+  host.innerHTML = sessions.map((s, i) => {
+    const head = `<div class="m-row">
+        <strong class="title-md m-grow">${esc(s.session.label)}</strong>
+        <span class="caption m-muted" style="text-align:right">${dayLabel(s.cookDate)}<br>covers ${esc(s.coversLabel.toLowerCase())}</span>
+      </div>`;
+
     if (s.empty) {
-      return `<div class="m-batch batch">
-        <div class="row"><strong>${esc(s.session.label)}</strong>
-          <span class="unit">${dayLabel(s.cookDate)}</span></div>
-        <p class="caption m-muted" style="padding:6px 0 0">Nothing to cook ahead for ${esc(s.coversLabel.toLowerCase())}
+      return `<div class="m-batch batch" data-pane="${i}"${i === batchTab ? '' : ' hidden'}>
+        ${head}
+        <p class="caption m-muted">Nothing to cook ahead for ${esc(s.coversLabel.toLowerCase())}
           — plan those days first, or everything in them is made fresh.</p>
       </div>`;
     }
-    return `<div class="m-batch batch">
-      <div class="m-row">
-        <strong class="title-md m-grow">${esc(s.session.label)}</strong>
-        <span class="caption m-muted" style="text-align:right">${dayLabel(s.cookDate)}<br>covers ${esc(s.coversLabel.toLowerCase())}</span>
-      </div>
+
+    return `<div class="m-batch batch" data-pane="${i}"${i === batchTab ? '' : ' hidden'}>
+      ${head}
       <div class="m-batch__meta caption"><span>Hands-on ~${s.handsOn} min</span><span>In the kitchen ~${s.elapsed} min</span><span>${s.totalPortions} portions</span></div>
 
-      ${s.marinadeJobs?.length ? `<div class="m-jar" style="display:block"><strong class="title-sm">Jars</strong>
+      ${s.marinadeJobs?.length ? `<div class="m-jar m-block"><strong class="title-sm">Jars</strong>
         <div class="caption m-muted">Marinades keep a week or two — only made when stock runs out</div>
-        ${s.marinadeJobs.map((j) => `<details class="sub-recipe${j.makeJar ? ' todo' : ' stocked'}"
+        ${s.marinadeJobs.map((j) => `<details class="m-nest-d${j.makeJar ? '' : ' stocked'}"
             data-marinade="${j.marinade.id}" data-days="${j.keepsDays}">
-          <summary>${j.makeJar ? '🫙 Make' : '✓ In the fridge'} — ${esc(j.marinade.title)}
-            <span class="unit">· ${j.makeJar
+          <summary class="caption-strong">${j.makeJar ? 'Make' : '✓ In the fridge'} — ${esc(j.marinade.title)}
+            <span class="unit m-muted"> · ${j.makeJar
               ? `${j.jarsToMake} jar${j.jarsToMake > 1 ? 's' : ''} of ${j.perJar}, keeps ${j.keepsDays} days`
               : `${j.stock.remaining} left, use by ${j.stock.expiresOn}`}</span></summary>
-          <div class="m" style="margin-bottom:6px">For ${esc(j.usedBy.join(', '))} · this window needs about ${j.needed}</div>
+          <div class="caption m-muted" style="margin-bottom:6px">For ${esc(j.usedBy.join(', '))} · this window needs about ${j.needed}</div>
           ${ingredientList(j.marinade, Math.max(1, j.jarsToMake || 1))}${methodList(j.marinade)}
           ${j.makeJar ? `<button class="m-btn caption-strong jarbtn" data-id="${j.marinade.id}" data-days="${j.keepsDays}">Made a jar</button>` : ''}
         </details>`).join('')}
       </div>` : ''}
 
-      ${s.items.map((it) => `<div class="m-jar" style="display:block">
-        <strong class="title-sm">${esc(it.title)}</strong>${it.batches > 1 ? ` <span class="unit">×${it.batches} batches</span>` : ''}
-        <div class="caption m-muted">${Math.ceil(it.portions)} portions for ${esc(it.days.join(', '))} ·
+      ${s.items.map((it) => `<div class="m-jar m-block">
+        <strong class="title-sm">${esc(it.title)}${it.batches > 1 ? ` <span class="unit m-muted">×${it.batches} batches</span>` : ''}</strong>
+        <div class="caption m-muted">${Math.ceil(it.portions)} portion${Math.ceil(it.portions) === 1 ? '' : 's'} for ${esc(it.days.join(', '))} ·
           ${it.prepMin} min prep · ${it.cookMin} min cook</div>
-        ${it.storage ? `<div class="m">${esc(it.storage)}</div>` : ''}
-        <details class="sub-recipe"><summary>Recipe${it.batches > 1 ? ` — quantities ×${it.batches}` : ''}</summary>
+        ${it.storage ? `<div class="caption m-muted">${esc(it.storage)}</div>` : ''}
+        <details class="m-nest-d"><summary class="caption-strong">Recipe${it.batches > 1 ? ` — quantities ×${it.batches}` : ''}</summary>
           ${recipeDetail(it.recipe, it.batches)}</details>
       </div>`).join('')}
 
       ${s.items.length ? `<ol class="m-steps body">${s.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}
 
-      ${s.prepAhead?.length ? `<div class="m-jar" style="display:block">
-        <strong>Prep ahead for the fresh meals</strong>
-        <span class="unit"> · ~${s.prepMinutes} min</span>
-        ${s.prepAhead.map((f) => `<div class="item">
-          <strong>${esc(f.title)}</strong>
-          <div class="m">${esc(f.days.join(', '))}</div>
+      ${s.prepAhead?.length ? `<div class="m-jar m-block">
+        <strong class="title-sm">Prep ahead for the fresh meals<span class="unit m-muted"> · ~${s.prepMinutes} min</span></strong>
+        ${s.prepAhead.map((f) => `<div class="m-subitem">
+          <strong class="caption-strong">${esc(f.title)}</strong>
+          <div class="caption m-muted">${esc(f.days.join(', '))}</div>
           <ul style="margin:5px 0 0;padding-left:19px">${
-            f.tasks.map((t) => `<li>${esc(t.text)}${
+            f.tasks.map((t) => `<li class="body">${esc(t.text)}${
               t.kind === 'marinade' && t.marinade
-                ? `<details class="sub-recipe"><summary>${esc(t.marinade.title)} — how to make it</summary>
+                ? `<details class="m-nest-d"><summary class="caption-strong">${esc(t.marinade.title)} — how to make it</summary>
                    ${ingredientList(t.marinade, 1)}${methodList(t.marinade)}</details>`
                 : ''}</li>`).join('')}</ul>
-          <details class="sub-recipe"><summary>Full recipe · ${f.prepMin} min prep${
+          <details class="m-nest-d"><summary class="caption-strong">Full recipe · ${f.prepMin} min prep${
             f.cookMin ? ` + ${f.cookMin} min cook` : ''}</summary>${recipeDetail(f.recipe, 1)}</details>
         </div>`).join('')}
       </div>` : ''}
@@ -807,6 +884,31 @@ async function renderBatch() {
     </div>`;
   }).join('');
 
+  // Switching a sub-tab only shows a different pane — it never re-renders,
+  // because re-rendering is what double-bound the taps last time.
+  tabs.querySelectorAll('button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      batchTab = Number(btn.dataset.i);
+      tabs.querySelectorAll('button').forEach((b) =>
+        b.setAttribute('aria-selected', String(Number(b.dataset.i) === batchTab)));
+      host.querySelectorAll('[data-pane]').forEach((pane) => {
+        pane.hidden = Number(pane.dataset.pane) !== batchTab;
+      });
+      TG?.HapticFeedback?.selectionChanged?.();
+    });
+  });
+
+  // "Made a jar" had markup but no handler — the jar never got recorded, so the
+  // next cook session always asked for it again.
+  host.querySelectorAll('.jarbtn').forEach((btn) => {
+    btn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      const res = await act({ action: 'prep-made', recipeId: btn.dataset.id, days: Number(btn.dataset.days) });
+      if (!res) return;
+      toast(`Jar logged — use by ${res.expiresOn || res.expires_on || 'the date on the lid'}`);
+      renderBatch();
+    });
+  });
 }
 
 /** Swap, resize or clear any meal on any day, and fill empty slots. */
@@ -905,11 +1007,11 @@ async function renderPlan() {
         <button class="m-day__row slotline${e.recipe ? ' tappable' : ''}" data-day="${d.date}" data-i="${idx}">
           <span class="m-day__slot label m-up">${e.slot}</span>
           <span class="m-day__name body">${esc(e.title)}${e.portion !== 1 ? ` <span class="unit m-muted">×${e.portion}</span>` : ''}
-            ${e.note ? `<span class="caption m-muted" style="display:block">${esc(e.note)}</span>` : ''}</span>
-          ${(e.prep || []).length ? `<span class="m-prep label">${
-            (e.prep || []).some((t) => t.kind === 'marinade') ? 'JAR'
-            : (e.prep || []).some((t) => t.kind === 'marinate') ? 'MARINATE'
-            : (e.prep || []).some((t) => t.kind === 'grain') ? 'COOK AHEAD' : 'CHOP'}</span>` : ''}
+            ${e.note ? `<span class="caption m-muted" style="display:block">${esc(e.note)}</span>` : ''}
+            ${(e.prep || []).length ? `<span class="m-prep label" style="margin-top:3px">${
+              (e.prep || []).some((t) => t.kind === 'marinade') ? 'JAR'
+              : (e.prep || []).some((t) => t.kind === 'marinate') ? 'MARINATE'
+              : (e.prep || []).some((t) => t.kind === 'grain') ? 'COOK AHEAD' : 'CHOP'}</span>` : ''}</span>
           <span class="m-day__kcal caption">${e.recipe ? Math.round((e.recipe.calories_per_serving || 0) * e.portion) + ' kcal' : '—'}</span>
         </button>
         ${e.recipe ? `<div class="slotdetail" hidden>
@@ -919,9 +1021,9 @@ async function renderPlan() {
             <button class="m-act portion caption-strong" data-dir="1" aria-label="Larger portion">+¼</button>
             <button class="m-act clear caption-strong">Remove</button>
           </div>
-          ${(e.prep || []).length ? `<div class="prepbox"><strong>Prep before this</strong><ul>${
-            e.prep.map((t) => `<li>${esc(t.text)}${
-              t.marinade ? `<details class="sub-recipe"><summary>${esc(t.marinade.title)}</summary>
+          ${(e.prep || []).length ? `<div class="m-prepbox"><strong class="caption-strong">Prep before this</strong><ul>${
+            e.prep.map((t) => `<li class="body">${esc(t.text)}${
+              t.marinade ? `<details class="m-nest-d"><summary class="caption-strong">${esc(t.marinade.title)}</summary>
                 ${ingredientList(t.marinade, 1)}${methodList(t.marinade)}</details>` : ''}</li>`).join('')
           }</ul></div>` : ''}
           ${recipeDetail(e.recipe, e.portion)}
@@ -1046,43 +1148,110 @@ async function renderProgress() {
 }
 
 let RECIPES = [];
+let recipeCatId = 'all';
+
+/* Marinades and bases are repeat jobs rather than meals, and sides are not a
+   meal_type of their own, so the tabs are derived rather than taken straight
+   from the column. Two recipes carry no meal_type at all; their tags place
+   them instead of dropping them into "all" only. */
+const RECIPE_CATS = [
+  { id: 'all',       label: 'All' },
+  { id: 'breakfast', label: 'Breakfast' },
+  { id: 'lunch',     label: 'Lunch' },
+  { id: 'dinner',    label: 'Dinner' },
+  { id: 'snack',     label: 'Snacks' },
+  { id: 'side',      label: 'Sides' },
+  { id: 'marinade',  label: 'Marinades' },
+];
+
+function recipeCat(r) {
+  const tags = (r.tags || []).map((t) => String(t).toLowerCase());
+  if (tags.includes('marinade') || tags.includes('base')) return 'marinade';
+  const mt = String(r.meal_type || '').toLowerCase();
+  if (['breakfast', 'lunch', 'dinner', 'snack'].includes(mt)) return mt;
+  if (tags.includes('side')) return 'side';
+  if (tags.includes('breakfast') || tags.includes('brunch')) return 'breakfast';
+  if (tags.includes('dessert') || tags.includes('snack')) return 'snack';
+  return 'other';
+}
+
 async function renderRecipes() {
-  if (!RECIPES.length) {
-    const rows = await tryRows('wt_recipes?select=*&order=title');
-    if (rows === null) {
-      el('recipe-list').innerHTML = `<div class="m-error caption">Couldn't load recipes.</div>`;
-      return;
-    }
-    RECIPES = rows;
+  // allRecipes() may already have filled the cache from the Today view, so the
+  // tabs are drawn on every visit rather than only on a cold load.
+  const rows = await allRecipes();
+  if (!rows.length) {
+    el('recipe-tabs').innerHTML = '';
+    el('recipe-list').innerHTML = `<div class="m-error caption">Couldn't load recipes.</div>`;
+    return;
   }
+  drawRecipeTabs();
   drawRecipes(el('recipe-search').value);
+}
+
+function drawRecipeTabs() {
+  const tabs = el('recipe-tabs');
+  tabs.innerHTML = RECIPE_CATS
+    .map((c) => ({ ...c, n: c.id === 'all' ? RECIPES.length : RECIPES.filter((r) => recipeCat(r) === c.id).length }))
+    .filter((c) => c.n > 0)
+    .map((c) => `<button class="caption-strong" role="tab" data-cat="${c.id}"
+       aria-selected="${c.id === recipeCatId}">${c.label}<span class="m-seg__n">${c.n}</span></button>`)
+    .join('');
+
+  tabs.querySelectorAll('button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      recipeCatId = btn.dataset.cat;
+      tabs.querySelectorAll('button').forEach((b) =>
+        b.setAttribute('aria-selected', String(b.dataset.cat === recipeCatId)));
+      TG?.HapticFeedback?.selectionChanged?.();
+      drawRecipes(el('recipe-search').value);
+    });
+  });
 }
 
 function drawRecipes(q = '') {
   const term = q.trim().toLowerCase();
-  const list = RECIPES.filter((r) => !term ||
-    [r.title, r.cuisine_type, r.meal_type, ...(r.tags || [])].join(' ').toLowerCase().includes(term));
 
-  el('recipe-list').innerHTML = list.length ? list.map((r, i) => `
-    <div class="m-recipe recipe${r.calories_per_serving == null ? ' m-stub' : ''}" data-i="${i}">
-      <div class="m-row" style="align-items:flex-start">
-        <h3 class="title-md m-grow" style="margin:0">${esc(r.title)}</h3>
-        <span class="metric-sm" style="white-space:nowrap">${r.calories_per_serving ?? '—'}<span class="unit m-muted"> kcal</span></span>
-      </div>
-      <div class="caption m-muted">
-        ${r.protein_per_serving ?? '—'}g protein · ${r.carbs_per_serving ?? '—'}g carbs · ${r.fat_per_serving ?? '—'}g fat
-        ${r.servings ? ` · serves ${r.servings}` : ''}
-      </div>
-      <div class="m-tags">${(r.tags || []).slice(0, 3).map((t) => `<span class="m-tag label">${esc(t)}</span>`).join('')}</div>
-      <div class="detail m-detail" style="border:0;padding:var(--space-3) 0 0">
+  // Search looks everywhere. Typing a name you can half remember should find it
+  // whichever tab you happen to be standing on.
+  const list = term
+    ? RECIPES.filter((r) => [r.title, r.cuisine_type, r.meal_type, ...(r.tags || [])]
+        .join(' ').toLowerCase().includes(term))
+    : RECIPES.filter((r) => recipeCatId === 'all' || recipeCat(r) === recipeCatId);
+
+  const sub = el('recipe-sub');
+  sub.hidden = !term;
+  if (term) sub.textContent = `${list.length} match${list.length === 1 ? '' : 'es'} across every section`;
+
+  el('recipe-list').innerHTML = list.length ? list.map((r) => `
+    <div class="m-recipe recipe${r.calories_per_serving == null ? ' m-stub' : ''}">
+      <button class="m-recipe__head" type="button" aria-expanded="false">
+        <span class="m-row" style="align-items:flex-start">
+          <span class="title-md m-grow">${esc(r.title)}</span>
+          <span class="metric-sm" style="white-space:nowrap">${r.calories_per_serving ?? '—'}<span class="unit m-muted"> kcal</span></span>
+          <svg class="m-recipe__chev" width="16" height="16" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+        </span>
+        <span class="caption m-muted">
+          ${r.protein_per_serving ?? '—'}g protein · ${r.carbs_per_serving ?? '—'}g carbs · ${r.fat_per_serving ?? '—'}g fat
+          ${r.servings ? ` · serves ${r.servings}` : ''}
+        </span>
+        ${(r.tags || []).length ? `<span class="m-tags">${(r.tags || []).slice(0, 3)
+          .map((t) => `<span class="m-tag label">${esc(t)}</span>`).join('')}</span>` : ''}
+      </button>
+      <div class="detail m-detail" style="border:0;padding:var(--space-3) 0 0" hidden>
         ${r.description ? `<p class="caption m-muted" style="margin:0 0 8px">${esc(r.description)}</p>` : ''}
         ${recipeDetail(r, 1)}
       </div>
-    </div>`).join('') : `<p class="caption m-muted">No recipes match “${esc(q)}”.</p>`;
+    </div>`).join('')
+    : `<p class="caption m-muted">${term ? `No recipes match “${esc(q)}”.` : 'Nothing in this section yet.'}</p>`;
 
-  document.querySelectorAll('.recipe').forEach((node) => {
-    node.addEventListener('click', () => {
-      node.classList.toggle('open');
+  // Only the header toggles. Binding the whole card meant that opening a
+  // marinade inside an expanded recipe collapsed the recipe under your finger.
+  el('recipe-list').querySelectorAll('.m-recipe__head').forEach((head) => {
+    head.addEventListener('click', () => {
+      const detail = head.nextElementSibling;
+      detail.hidden = !detail.hidden;
+      head.setAttribute('aria-expanded', String(!detail.hidden));
       TG?.HapticFeedback?.selectionChanged?.();
     });
   });
@@ -1293,6 +1462,18 @@ function wireSegment(id, onPick) {
 }
 wireSegment('plan-range', (d) => { planDays = d; renderPlan(); });
 wireSegment('shop-range', (d) => { shopDays = d; renderShopping(); });
+
+/* The days / Meal prep. Both panels are already rendered, so switching only
+   toggles them — calling renderPlan() here would re-bind every row handler. */
+el('plan-tabs').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  el('plan-tabs').querySelectorAll('button').forEach((b) =>
+    b.setAttribute('aria-selected', String(b === btn)));
+  el('plan-panel-days').hidden = btn.dataset.panel !== 'days';
+  el('plan-panel-prep').hidden = btn.dataset.panel !== 'prep';
+  TG?.HapticFeedback?.selectionChanged?.();
+});
 
 /* Telegram chooses which WellTrack variant to show and owns the chrome at the
    edges. It does not colour the content: the seven --tg-theme-* variables it
