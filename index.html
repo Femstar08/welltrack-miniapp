@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>WellTrack</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<script src="config.js"></script>
+<style>
+  :root {
+    --bg: #ffffff;
+    --text: #1c1c1e;
+    --hint: #8e8e93;
+    --link: #2481cc;
+    --button: #2481cc;
+    --button-text: #ffffff;
+    --secondary-bg: #f2f2f7;
+    --border: rgba(120,120,128,0.18);
+    --ok: #2f9e44;
+    --warn: #e8a317;
+    --bad: #e03131;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+    padding: 0 16px calc(76px + env(safe-area-inset-bottom));
+    max-width: 680px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 20px; margin: 18px 0 2px; letter-spacing: -0.02em; }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--hint); margin: 22px 0 8px; font-weight: 600; }
+  .sub { color: var(--hint); font-size: 13px; margin: 0 0 14px; }
+
+  .card {
+    background: var(--secondary-bg);
+    border-radius: var(--radius);
+    padding: 14px;
+    margin-bottom: 10px;
+  }
+  .row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .big { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; }
+  .unit { color: var(--hint); font-size: 13px; font-weight: 400; }
+
+  .bar { height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; margin-top: 9px; }
+  .bar > i { display: block; height: 100%; border-radius: 99px; background: var(--button); transition: width .45s cubic-bezier(.2,.7,.3,1); }
+  .bar.over > i { background: var(--warn); }
+
+  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .tile { background: var(--secondary-bg); border-radius: var(--radius); padding: 12px 13px; }
+  .tile .k { color: var(--hint); font-size: 12px; margin-bottom: 3px; }
+  .tile .v { font-size: 20px; font-weight: 640; letter-spacing: -0.02em; }
+
+  .pill { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 99px; background: var(--border); color: var(--text); margin-right: 5px; }
+  .status { font-size: 12px; font-weight: 600; }
+  .status.ok { color: var(--ok); } .status.warn { color: var(--warn); }
+  .status.bad { color: var(--bad); } .status.none { color: var(--hint); }
+
+  input[type=search] {
+    width: 100%; padding: 11px 13px; font-size: 15px; color: var(--text);
+    background: var(--secondary-bg); border: 0; border-radius: 11px; margin-bottom: 10px;
+    font-family: inherit;
+  }
+  input[type=search]::placeholder { color: var(--hint); }
+
+  .recipe { cursor: pointer; }
+  .recipe .row { align-items: center; }
+  .recipe h3 { margin: 0; font-size: 15px; font-weight: 600; }
+  .macros { color: var(--hint); font-size: 12.5px; margin-top: 3px; }
+  .detail { display: none; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
+  .recipe.open .detail { display: block; }
+  .detail ul, .detail ol { margin: 6px 0 0; padding-left: 20px; }
+  .detail li { margin-bottom: 4px; }
+
+  label.check { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-bottom: 1px solid var(--border); }
+  label.check:last-child { border-bottom: 0; }
+  label.check input { width: 19px; height: 19px; accent-color: var(--button); }
+  label.check.done span { text-decoration: line-through; color: var(--hint); }
+
+  svg.spark { width: 100%; height: 56px; display: block; margin-top: 8px; overflow: visible; }
+
+  nav {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    display: flex; background: var(--bg);
+    border-top: 1px solid var(--border);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  nav button {
+    flex: 1; border: 0; background: none; color: var(--hint);
+    font: 500 10.5px/1.1 inherit; padding: 9px 2px 10px; cursor: pointer;
+  }
+  nav button em { display: block; font-size: 19px; font-style: normal; margin-bottom: 3px; }
+  nav button[aria-current="true"] { color: var(--link); }
+
+  .empty { color: var(--hint); font-size: 13.5px; padding: 10px 0; }
+  .err { color: var(--bad); font-size: 13px; background: var(--secondary-bg); padding: 11px 13px; border-radius: 11px; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<main>
+  <section id="view-today">
+    <h1>Today</h1>
+    <p class="sub" id="today-sub">—</p>
+    <div id="today-macros"></div>
+    <h2>Session</h2>
+    <div class="card"><div id="today-session">—</div></div>
+    <h2>Streaks</h2>
+    <div class="grid" id="today-streaks"></div>
+  </section>
+
+  <section id="view-progress" hidden>
+    <h1>Progress</h1>
+    <p class="sub" id="progress-sub">Against the 6-month glide path</p>
+    <div id="progress-list"></div>
+  </section>
+
+  <section id="view-recipes" hidden>
+    <h1>Recipes</h1>
+    <input type="search" id="recipe-search" placeholder="Search name, cuisine or tag" autocomplete="off" />
+    <div id="recipe-list"></div>
+  </section>
+
+  <section id="view-shopping" hidden>
+    <h1>Shopping</h1>
+    <p class="sub">From this week's batch cook</p>
+    <div id="shopping-list"></div>
+  </section>
+
+  <section id="view-scorecard" hidden>
+    <h1>Scorecard</h1>
+    <p class="sub">Last 7 days</p>
+    <div id="scorecard"></div>
+  </section>
+</main>
+
+<nav>
+  <button data-view="today" aria-current="true"><em>📊</em>Today</button>
+  <button data-view="progress"><em>📈</em>Progress</button>
+  <button data-view="recipes"><em>🍳</em>Recipes</button>
+  <button data-view="shopping"><em>🛒</em>Shopping</button>
+  <button data-view="scorecard"><em>🏁</em>Score</button>
+</nav>
+
+<script>
+/* ---------------------------------------------------------------------------
+ * WellTrack mini app
+ *
+ * Reads the same Supabase tables the Telegram coach writes and the Flutter app
+ * syncs — wt_recipes, wt_meals / wt_meal_items / wt_daily_nutrition_summary,
+ * and the coach tracking tables (wt_weigh_ins, wt_energy_scores, ...).
+ *
+ * It is read-only on purpose: the coach owns writes, using the secret key.
+ * Anything this page cannot read (RLS, or a table that does not exist yet)
+ * degrades to an explicit message rather than a blank panel.
+ * ------------------------------------------------------------------------- */
+
+const CFG = window.WELLTRACK_CONFIG || {};
+const TG = window.Telegram?.WebApp;
+
+/* The plan's fixed constants, mirrored from health/6-month-transformation-plan.md */
+const PLAN_START = new Date('2026-10-26T00:00:00+01:00');   // Week 1, Monday
+const DAYS = [
+  { name: 'Sunday',    session: 'Full rest + batch cook', type: 'full rest', kcal: 1800, protein: 160 },
+  { name: 'Monday',    session: 'Upper Push',             type: 'training',  kcal: 2200, protein: 180 },
+  { name: 'Tuesday',   session: 'Rest + 30 min walk',     type: 'rest',      kcal: 1900, protein: 170 },
+  { name: 'Wednesday', session: 'Back & Pull',            type: 'training',  kcal: 2200, protein: 180 },
+  { name: 'Thursday',  session: 'Lower Body',             type: 'training',  kcal: 2200, protein: 180 },
+  { name: 'Friday',    session: 'Core + Conditioning',    type: 'training',  kcal: 2200, protein: 180 },
+  { name: 'Saturday',  session: 'Walk 30–45 min',         type: 'rest',      kcal: 1900, protein: 170 },
+];
+
+/* Glide path from the agent spec. month1/3/6 are the milestone targets. */
+const GLIDE = [
+  { key: 'weight',    label: 'Weight',            unit: 'kg', start: 91.5, m1: 90.5, m3: 88.5, m6: 86,  dir: 'down' },
+  { key: 'protein',   label: 'Protein hit rate',  unit: '%',  start: 0,    m1: 70,   m3: 85,   m6: 90,  dir: 'up' },
+  { key: 'plank',     label: 'Plank hold',        unit: 's',  start: 0,    m1: 45,   m3: 60,   m6: 90,  dir: 'up' },
+  { key: 'circuit',   label: 'Circuit rounds',    unit: '',   start: 1.5,  m1: 3,    m3: 4,    m6: 4.5, dir: 'up' },
+  { key: 'energy',    label: 'Energy (1–5 avg)',  unit: '',   start: 0,    m1: 3.0,  m3: 3.5,  m6: 4.0, dir: 'up' },
+  { key: 'supps',     label: 'Supplement compliance', unit: '%', start: 0, m1: 80,   m3: 90,   m6: 95,  dir: 'up' },
+];
+
+const todayISO = () => new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/London' });
+const dayInfo   = () => DAYS[new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/London' })).getDay()];
+const planWeek  = () => {
+  const w = Math.floor((Date.now() - PLAN_START.getTime()) / 6048e5) + 1;
+  return w < 1 ? 0 : w;
+};
+
+/* --- data access ---------------------------------------------------------- */
+
+async function sb(path) {
+  if (!CFG.url || !CFG.anonKey) throw new Error('config-missing');
+  const res = await fetch(`${CFG.url}/rest/v1/${path}`, {
+    headers: {
+      apikey: CFG.anonKey,
+      Authorization: `Bearer ${CFG.token || CFG.anonKey}`,
+      Accept: 'application/json',
+    },
+  });
+  if (res.status === 404) throw new Error('table-missing');
+  if (!res.ok) throw new Error(`http-${res.status}`);
+  return res.json();
+}
+
+/** Returns rows, or null when the table is unreadable — callers show why. */
+async function tryRows(path) {
+  try { return await sb(path); } catch { return null; }
+}
+
+/* --- rendering helpers ---------------------------------------------------- */
+
+const el = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+function macroCard(label, value, target, unit) {
+  const pct = target ? Math.min(100, Math.round((value / target) * 100)) : 0;
+  const over = target && value > target;
+  return `<div class="card">
+    <div class="row">
+      <strong>${label}</strong>
+      <span class="big">${Math.round(value)}<span class="unit"> / ${target}${unit}</span></span>
+    </div>
+    <div class="bar${over ? ' over' : ''}"><i style="width:${pct}%"></i></div>
+  </div>`;
+}
+
+function statusFor(current, target, dir, points) {
+  if (points < 3) return ['none', '⏸️ Insufficient data'];
+  const progress = dir === 'down' ? (91.5 - current) / (91.5 - target) : current / target;
+  if (progress >= 1) return ['ok', '✅ On track'];
+  if (progress >= 0.75) return ['warn', '⚠️ At risk'];
+  return ['bad', '🔴 Off track'];
+}
+
+function sparkline(values) {
+  if (values.length < 2) return '';
+  const min = Math.min(...values), max = Math.max(...values), span = max - min || 1;
+  const pts = values.map((v, i) => {
+    const x = (i / (values.length - 1)) * 100;
+    const y = 50 - ((v - min) / span) * 44;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(' ');
+  return `<svg class="spark" viewBox="0 0 100 56" preserveAspectRatio="none" aria-hidden="true">
+    <polyline points="${pts}" fill="none" stroke="var(--link)" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke" />
+  </svg>`;
+}
+
+/* --- views ---------------------------------------------------------------- */
+
+async function renderToday() {
+  const d = dayInfo(), week = planWeek();
+  el('today-sub').textContent =
+    `${d.name} · ${d.type} day · ${week ? `week ${week} of 24` : 'plan starts Mon 26 Oct'}`;
+  el('today-session').innerHTML =
+    `<strong>${d.session}</strong>` +
+    (week && week % 4 === 0 ? `<div class="macros">Deload week — weights down 40%, one less set</div>` : '');
+
+  const summary = await tryRows(`wt_daily_nutrition_summary?select=*&summary_date=eq.${todayISO()}&limit=1`);
+  if (summary === null) {
+    el('today-macros').innerHTML =
+      `<div class="err">Can't read today's totals. The table may not exist yet, or row-level security is blocking an unauthenticated read.</div>`;
+  } else {
+    const t = summary[0] || {};
+    el('today-macros').innerHTML =
+      macroCard('Calories', t.total_calories || 0, d.kcal, ' kcal') +
+      macroCard('Protein', t.total_protein_g || 0, d.protein, 'g') +
+      (summary.length ? '' : `<p class="empty">Nothing logged yet today.</p>`);
+  }
+
+  const energy = await tryRows('wt_energy_scores?select=date,score&order=date.desc&limit=7');
+  const supps  = await tryRows('wt_supplement_logs?select=date,completed&order=date.desc&limit=14');
+  el('today-streaks').innerHTML = [
+    ['Energy today', energy?.[0]?.date === todayISO() ? `${energy[0].score}/5` : '—'],
+    ['Supplements', supps ? `${supps.filter((s) => s.completed).length}/14 slots` : '—'],
+    ['Plan week', week || '—'],
+    ['Day type', d.type],
+  ].map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join('');
+}
+
+async function renderProgress() {
+  const weights = await tryRows('wt_weigh_ins?select=date,weight_kg&order=date.asc&limit=60');
+  if (weights === null) {
+    el('progress-list').innerHTML =
+      `<div class="err">Progress tables aren't readable yet. Run <code>20261024133000_add_coach_tracking_tables.sql</code>, and make sure this app can read them.</div>`;
+    return;
+  }
+
+  const energy  = await tryRows('wt_energy_scores?select=date,score&order=date.asc&limit=60') || [];
+  const planks  = await tryRows('wt_plank_logs?select=date,seconds&order=date.asc&limit=60') || [];
+  const circuit = await tryRows('wt_circuit_logs?select=date,rounds&order=date.asc&limit=60') || [];
+
+  const series = {
+    weight:  weights.map((r) => Number(r.weight_kg)),
+    energy:  energy.map((r) => r.score),
+    plank:   planks.map((r) => r.seconds),
+    circuit: circuit.map((r) => r.rounds),
+  };
+
+  const week = planWeek();
+  const milestone = week <= 4 ? 'm1' : week <= 12 ? 'm3' : 'm6';
+  const milestoneLabel = milestone === 'm1' ? 'Month 1' : milestone === 'm3' ? 'Month 3' : 'Month 6';
+  el('progress-sub').textContent = `Next milestone: ${milestoneLabel} (week ${milestone === 'm1' ? 4 : milestone === 'm3' ? 12 : 24})`;
+
+  el('progress-list').innerHTML = GLIDE.map((m) => {
+    const vals = series[m.key] || [];
+    const current = vals.length ? vals[vals.length - 1] : null;
+    const target = m[milestone];
+    const [cls, label] = current === null ? ['none', '⏸️ Insufficient data'] : statusFor(current, target, m.dir, vals.length);
+    return `<div class="card">
+      <div class="row">
+        <strong>${m.label}</strong>
+        <span class="status ${cls}">${label}</span>
+      </div>
+      <div class="row" style="margin-top:4px">
+        <span class="big">${current ?? '—'}<span class="unit">${m.unit}</span></span>
+        <span class="unit">target ${target}${m.unit}</span>
+      </div>
+      ${sparkline(vals)}
+    </div>`;
+  }).join('');
+}
+
+let RECIPES = [];
+async function renderRecipes() {
+  if (!RECIPES.length) {
+    const rows = await tryRows('wt_recipes?select=*&order=title');
+    if (rows === null) {
+      el('recipe-list').innerHTML = `<div class="err">Couldn't load recipes.</div>`;
+      return;
+    }
+    RECIPES = rows;
+  }
+  drawRecipes(el('recipe-search').value);
+}
+
+function drawRecipes(q = '') {
+  const term = q.trim().toLowerCase();
+  const list = RECIPES.filter((r) => !term ||
+    [r.title, r.cuisine_type, r.meal_type, ...(r.tags || [])].join(' ').toLowerCase().includes(term));
+
+  el('recipe-list').innerHTML = list.length ? list.map((r, i) => `
+    <div class="card recipe" data-i="${i}">
+      <div class="row">
+        <h3>${esc(r.title)}</h3>
+        <span class="unit">${r.calories_per_serving ?? '—'} kcal</span>
+      </div>
+      <div class="macros">
+        ${r.protein_per_serving ?? '—'}g protein · ${r.carbs_per_serving ?? '—'}g carbs · ${r.fat_per_serving ?? '—'}g fat
+        ${r.servings ? ` · serves ${r.servings}` : ''}
+      </div>
+      <div style="margin-top:7px">${(r.tags || []).slice(0, 3).map((t) => `<span class="pill">${esc(t)}</span>`).join('')}</div>
+      <div class="detail">
+        ${r.description ? `<p style="margin:0 0 8px">${esc(r.description)}</p>` : ''}
+        ${(r.ingredients || []).length ? `<strong>Ingredients</strong><ul>${
+          r.ingredients.map((g) => `<li>${esc([g.quantity, g.unit, g.item].filter(Boolean).join(' '))}</li>`).join('')
+        }</ul>` : ''}
+        ${(r.instructions || []).length ? `<strong style="display:block;margin-top:10px">Method</strong><ol>${
+          r.instructions.map((s) => `<li>${esc(s.instruction || s)}</li>`).join('')
+        }</ol>` : '<p class="empty">No method recorded for this one yet.</p>'}
+      </div>
+    </div>`).join('') : `<p class="empty">No recipes match “${esc(q)}”.</p>`;
+
+  document.querySelectorAll('.recipe').forEach((node) => {
+    node.addEventListener('click', () => {
+      node.classList.toggle('open');
+      TG?.HapticFeedback?.selectionChanged?.();
+    });
+  });
+}
+
+/** Shopping list is derived from the batch-cook recipes, grouped for the aisle. */
+async function renderShopping() {
+  if (!RECIPES.length) {
+    const rows = await tryRows('wt_recipes?select=*&order=title');
+    if (rows === null) { el('shopping-list').innerHTML = `<div class="err">Couldn't load recipes.</div>`; return; }
+    RECIPES = rows;
+  }
+
+  const batch = RECIPES.filter((r) => (r.tags || []).includes('batch-protein') || (r.tags || []).includes('marinade'));
+  if (!batch.length) { el('shopping-list').innerHTML = `<p class="empty">No batch-cook recipes yet.</p>`; return; }
+
+  const GROUPS = {
+    Proteins: /chicken|salmon|turkey|beef|prawn|tuna|egg|mackerel/i,
+    Produce:  /pepper|onion|garlic|spinach|tomato|lemon|lime|plantain|avocado|herb|coriander|parsley|dill|thyme|chive|rocket|ginger|beetroot|blueberr/i,
+    Staples:  /rice|oat|bread|bean|lentil|chickpea|flour|honey|oil|vinegar|soy|stock|mirin|seed|nut|yoghurt|milk|cheese|feta|butter/i,
+  };
+
+  const buckets = { Proteins: new Set(), Produce: new Set(), Staples: new Set(), Other: new Set() };
+  for (const r of batch) {
+    for (const g of r.ingredients || []) {
+      const name = g.item || '';
+      const group = Object.keys(GROUPS).find((k) => GROUPS[k].test(name)) || 'Other';
+      buckets[group].add(name.replace(/,.*$/, '').trim());
+    }
+  }
+
+  const saved = JSON.parse(localStorage.getItem('wt-shopping') || '{}');
+  el('shopping-list').innerHTML = Object.entries(buckets)
+    .filter(([, items]) => items.size)
+    .map(([group, items]) => `<h2>${group}</h2><div class="card">${
+      [...items].sort().map((item) => {
+        const id = `s-${btoa(unescape(encodeURIComponent(item))).replace(/=/g, '')}`;
+        const done = saved[id] ? ' done' : '';
+        return `<label class="check${done}"><input type="checkbox" id="${id}"${saved[id] ? ' checked' : ''}><span>${esc(item)}</span></label>`;
+      }).join('')
+    }</div>`).join('');
+
+  el('shopping-list').querySelectorAll('input[type=checkbox]').forEach((box) => {
+    box.addEventListener('change', () => {
+      box.closest('label').classList.toggle('done', box.checked);
+      const state = JSON.parse(localStorage.getItem('wt-shopping') || '{}');
+      state[box.id] = box.checked;
+      localStorage.setItem('wt-shopping', JSON.stringify(state));
+      TG?.HapticFeedback?.impactOccurred?.('light');
+    });
+  });
+}
+
+async function renderScorecard() {
+  const since = new Date(Date.now() - 6 * 864e5).toLocaleDateString('en-CA');
+  const days   = await tryRows(`wt_daily_nutrition_summary?select=*&summary_date=gte.${since}&order=summary_date.asc`);
+  const energy = await tryRows(`wt_energy_scores?select=date,score&date=gte.${since}`) || [];
+  const batch  = await tryRows(`wt_batch_cook_logs?select=date,completed&date=gte.${since}`) || [];
+
+  if (days === null) {
+    el('scorecard').innerHTML = `<div class="err">Daily totals aren't readable yet.</div>`;
+    return;
+  }
+  if (!days.length) {
+    el('scorecard').innerHTML = `<p class="empty">No logged days yet this week. The coach fills this in as you log meals.</p>`;
+    return;
+  }
+
+  const hit = days.filter((d) => (d.total_protein_g || 0) >= 160).length;
+  const avgKcal = Math.round(days.reduce((a, d) => a + (d.total_calories || 0), 0) / days.length);
+  const avgProt = Math.round(days.reduce((a, d) => a + (d.total_protein_g || 0), 0) / days.length);
+  const avgEnergy = energy.length ? (energy.reduce((a, e) => a + e.score, 0) / energy.length).toFixed(1) : '—';
+
+  el('scorecard').innerHTML = `<div class="grid">
+    ${[['Protein target hit', `${hit}/${days.length}`],
+       ['Avg calories', `${avgKcal}`],
+       ['Avg protein', `${avgProt}g`],
+       ['Avg energy', avgEnergy],
+       ['Batch cooks', `${batch.filter((b) => b.completed).length}/2`],
+       ['Days logged', `${days.length}/7`]]
+      .map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}
+  </div>
+  ${sparkline(days.map((d) => d.total_protein_g || 0))}
+  <p class="sub" style="margin-top:6px">Daily protein, last ${days.length} days</p>`;
+}
+
+/* --- shell ---------------------------------------------------------------- */
+
+const VIEWS = { today: renderToday, progress: renderProgress, recipes: renderRecipes, shopping: renderShopping, scorecard: renderScorecard };
+
+function show(name) {
+  for (const key of Object.keys(VIEWS)) el(`view-${key}`).hidden = key !== name;
+  document.querySelectorAll('nav button').forEach((b) =>
+    b.setAttribute('aria-current', String(b.dataset.view === name)));
+  VIEWS[name]();
+  try { localStorage.setItem('wt-tab', name); } catch {}
+}
+
+document.querySelectorAll('nav button').forEach((b) =>
+  b.addEventListener('click', () => { show(b.dataset.view); TG?.HapticFeedback?.selectionChanged?.(); }));
+
+el('recipe-search').addEventListener('input', (e) => drawRecipes(e.target.value));
+
+/* Telegram theme — fall back to the CSS defaults outside Telegram */
+function applyTheme() {
+  const p = TG?.themeParams;
+  if (!p) return;
+  const map = {
+    '--bg': p.bg_color, '--text': p.text_color, '--hint': p.hint_color,
+    '--link': p.link_color, '--button': p.button_color,
+    '--button-text': p.button_text_color, '--secondary-bg': p.secondary_bg_color,
+  };
+  for (const [k, v] of Object.entries(map)) if (v) document.documentElement.style.setProperty(k, v);
+}
+
+if (TG) { TG.ready(); TG.expand?.(); applyTheme(); TG.onEvent?.('themeChanged', applyTheme); }
+
+if (!CFG.url || !CFG.anonKey) {
+  document.querySelector('main').innerHTML =
+    `<h1>Not configured</h1><div class="err">Copy <code>config.example.js</code> to <code>config.js</code> and fill in your Supabase URL and anon key.</div>`;
+} else {
+  let start = 'today';
+  try { start = localStorage.getItem('wt-tab') || 'today'; } catch {}
+  show(VIEWS[start] ? start : 'today');
+}
+</script>
+</body>
+</html>
