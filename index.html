@@ -114,6 +114,14 @@
     font: 600 12.5px/1 inherit;
   }
   .seg button[aria-pressed="true"] { background: var(--button); color: var(--button-text); }
+  .batch .row + .row { margin-top: 2px; }
+  .batch ol { margin: 10px 0 0; padding-left: 20px; font-size: 13.5px; }
+  .batch ol li { margin-bottom: 5px; }
+  .batch .item { padding: 8px 0; border-top: 1px solid var(--border); }
+  .batch .item:first-of-type { border-top: 0; }
+  .batch .item .m { color: var(--hint); font-size: 12.5px; margin-top: 2px; }
+  .batch .fresh { margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--border);
+                  color: var(--hint); font-size: 12.5px; }
   .dayhead { display: flex; align-items: baseline; justify-content: space-between;
              margin: 18px 0 7px; gap: 8px; }
   .dayhead strong { font-size: 14px; }
@@ -179,6 +187,9 @@
       <button data-days="7" aria-pressed="true">This week</button>
       <button data-days="14">Two weeks</button>
     </div>
+    <h2>Batch cook</h2>
+    <div id="batch-sessions"></div>
+    <h2>The days</h2>
     <div id="plan-days"></div>
   </section>
 
@@ -702,11 +713,68 @@ function dayLabel(iso) {
   return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
 }
 
+
+/* --- batch cook ---------------------------------------------------------- */
+
+async function renderBatch() {
+  const host = el('batch-sessions');
+  host.innerHTML = '<p class="empty">Working out the cook sessions…</p>';
+
+  let upcomingSessions;
+  try {
+    ({ upcomingSessions } = await import('./batchplan.js'));
+  } catch {
+    host.innerHTML = '<p class="empty">Batch planning unavailable.</p>';
+    return;
+  }
+
+  const recipes = await allRecipes();
+  const rows = await tryRows(
+    `wt_coach_daily_plan?select=date,slot,recipe_id,recipe_title,portion` +
+    `&date=gte.${todayISO()}&date=lte.${addDays(todayISO(), 20)}&order=date`) || [];
+
+  const sessions = upcomingSessions(recipes, rows, todayISO(), 2);
+
+  host.innerHTML = sessions.map((s) => {
+    if (s.empty) {
+      return `<div class="card batch">
+        <div class="row"><strong>${esc(s.session.label)}</strong>
+          <span class="unit">${dayLabel(s.cookDate)}</span></div>
+        <p class="empty" style="padding:6px 0 0">Nothing to cook ahead for ${esc(s.coversLabel.toLowerCase())}
+          — plan those days first, or everything in them is made fresh.</p>
+      </div>`;
+    }
+    return `<div class="card batch">
+      <div class="row">
+        <strong>${esc(s.session.label)}</strong>
+        <span class="unit">${dayLabel(s.cookDate)} · covers ${esc(s.coversLabel.toLowerCase())}</span>
+      </div>
+      <div class="macros">Hands-on ~${s.handsOn} min · in the kitchen ~${s.elapsed} min · ${s.totalPortions} portions</div>
+
+      ${s.marinades.length ? `<div class="item"><strong>Marinades first</strong>
+        <div class="m">${s.marinades.map((m) => esc(m.title)).join(', ')}</div></div>` : ''}
+
+      ${s.items.map((it) => `<div class="item">
+        <strong>${esc(it.title)}</strong>${it.batches > 1 ? ` <span class="unit">×${it.batches} batches</span>` : ''}
+        <div class="m">${Math.ceil(it.portions)} portions for ${esc(it.days.join(', '))} ·
+          ${it.prepMin} min prep · ${it.cookMin} min cook</div>
+        ${it.storage ? `<div class="m">${esc(it.storage)}</div>` : ''}
+      </div>`).join('')}
+
+      <ol>${s.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
+
+      ${s.freshOnTheDay?.length ? `<div class="fresh">Made fresh on the day:
+        ${s.freshOnTheDay.map(esc).join(', ')}</div>` : ''}
+    </div>`;
+  }).join('');
+}
+
 /* --- the Plan tab -------------------------------------------------------- */
 
 let planDays = 7;
 
 async function renderPlan() {
+  renderBatch();
   const start = todayISO();
   const days = await planRange(start, planDays);
 
