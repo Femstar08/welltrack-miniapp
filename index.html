@@ -905,8 +905,10 @@ async function renderBatch() {
       ev.preventDefault();
       const res = await act({ action: 'prep-made', recipeId: btn.dataset.id, days: Number(btn.dataset.days) });
       if (!res) return;
-      toast(`Jar logged — use by ${res.expiresOn || res.expires_on || 'the date on the lid'}`);
-      renderBatch();
+      toast(`Jar logged — use by ${res.expiresOn}`);
+      // The days tab's prep chips read jar stock too, so MARINATE/JAR would go
+      // stale if only this panel redrew.
+      renderPlan();
     });
   });
 }
