@@ -115,6 +115,10 @@
   }
   .seg button[aria-pressed="true"] { background: var(--button); color: var(--button-text); }
   .slotline.tappable { cursor: pointer; }
+  .slotline.empty { cursor: pointer; color: var(--hint); }
+  .slotline.empty em { font-style: normal; }
+  .acts.planacts { margin: 0 0 12px; }
+  .acts.planacts button { font-size: 12px; padding: 7px 4px; }
   .slotline.tappable .t::after { content: ' ›'; color: var(--hint); }
   .slotline.open .t::after { content: ' ⌄'; }
   .slotdetail { padding: 4px 0 12px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
@@ -880,6 +884,61 @@ async function renderBatch() {
 
 }
 
+/** Swap, resize or clear any meal on any day, and fill empty slots. */
+function wirePlanEditing() {
+  const refresh = () => renderPlan();
+
+  // An empty slot is an invitation, not a gap
+  el('plan-days').querySelectorAll('.slotline.empty').forEach((row) => {
+    row.addEventListener('click', () => {
+      const { slot, date } = row.dataset;
+      openSwap({ key: slot, label: slot }, [], async (recipeId) => {
+        const res = await act({ action: 'set-slot', date, slot, recipeId });
+        if (!res) return;
+        toast(`${res.title} added to ${slot}`);
+        refresh();
+      });
+    });
+  });
+
+  el('plan-days').querySelectorAll('.planacts').forEach((bar) => {
+    const { date, slot, recipe } = bar.dataset;
+
+    bar.querySelector('.swap').addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      openSwap({ key: slot, label: slot }, recipe ? [recipe] : [], async (recipeId) => {
+        const res = await act({ action: 'swap', date, slot, recipeId });
+        if (!res) return;
+        toast(`${slot} → ${res.title}`);
+        refresh();
+      });
+    });
+
+    bar.querySelectorAll('.portion').forEach((btn) => {
+      btn.addEventListener('click', async (ev) => {
+        ev.stopPropagation();
+        const row = bar.closest('.slotdetail')?.previousElementSibling;
+        const shown = row?.querySelector('.unit')?.textContent?.match(/×([\d.]+)/);
+        const current = shown ? Number(shown[1]) : 1;
+        const next = Math.round((current + 0.25 * Number(btn.dataset.dir)) * 100) / 100;
+        if (next <= 0 || next > 4) return toast('Portion must be between ¼ and 4');
+        const res = await act({ action: 'set-portion', date, slot, portion: next });
+        if (!res) return;
+        toast(`${slot} ×${next}`);
+        refresh();
+      });
+    });
+
+    bar.querySelector('.clear').addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      const res = await act({ action: 'clear-slot', date, slot });
+      if (!res) return;
+      toast(`${slot} cleared`);
+      refresh();
+    });
+  });
+}
+
 let planDays = 7;
 
 async function renderPlan() {
@@ -908,7 +967,14 @@ async function renderPlan() {
         <strong>${dayLabel(d.date)} · <span class="unit">${d.meta.type}</span></strong>
         <span class="totals${short ? ' short' : ''}">${d.kcal}/${d.meta.kcal} kcal · ${d.protein}/${d.meta.protein}g P</span>
       </div>
-      <div class="card">${d.entries.map((e, idx) => `
+      <div class="card">${SLOTS.map((sl) => d.entries.find((x) => x.slot === sl.key) || {
+          slot: sl.key, title: null, portion: 1, recipe: null, prep: [],
+        }).map((e, idx) => !e.recipe && !e.title ? `
+        <div class="slotline empty" data-date="${d.date}" data-slot="${e.slot}">
+          <span class="s">${e.slot}</span>
+          <span class="t"><em>nothing planned</em></span>
+          <span class="m">add ＋</span>
+        </div>` : `
         <div class="slotline${e.recipe ? ' tappable' : ''}" data-day="${d.date}" data-i="${idx}">
           <span class="s">${e.slot}</span>
           <span class="t">${esc(e.title)}${e.portion !== 1 ? ` <span class="unit">×${e.portion}</span>` : ''}
@@ -919,6 +985,12 @@ async function renderPlan() {
           <span class="m">${e.recipe ? Math.round((e.recipe.calories_per_serving || 0) * e.portion) + ' kcal' : '—'}</span>
         </div>
         ${e.recipe ? `<div class="slotdetail" hidden>
+          <div class="acts planacts" data-date="${d.date}" data-slot="${e.slot}" data-recipe="${e.recipe.id || ''}">
+            <button class="swap">⇄ Swap</button>
+            <button class="portion" data-dir="-1">−¼</button>
+            <button class="portion" data-dir="1">+¼</button>
+            <button class="clear">Remove</button>
+          </div>
           ${(e.prep || []).length ? `<div class="prepbox"><strong>Prep before this</strong><ul>${
             e.prep.map((t) => `<li>${esc(t.text)}${
               t.marinade ? `<details class="sub-recipe"><summary>${esc(t.marinade.title)}</summary>
@@ -928,6 +1000,8 @@ async function renderPlan() {
         </div>` : ''}`).join('')}
       </div>`;
   }).join('');
+
+  wirePlanEditing();
 
   // Tap a meal to see what is in it and how to make it
   el('plan-days').querySelectorAll('.slotline.tappable').forEach((row) => {
