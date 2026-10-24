@@ -6,6 +6,7 @@
 <title>WellTrack</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="config.js"></script>
+<script src="workouts.js"></script>
 <style>
   :root {
     --bg: #ffffff;
@@ -79,7 +80,21 @@
   label.check:last-child { border-bottom: 0; }
   label.check input { width: 19px; height: 19px; accent-color: var(--button); }
   label.check.done span { text-decoration: line-through; color: var(--hint); }
+  label.check em.qty { font-style: normal; color: var(--hint); }
+  label.check em.for { display: block; font-style: normal; font-size: 11.5px; color: var(--hint); }
 
+  table.ex { width: 100%; border-collapse: collapse; margin-top: 11px; font-size: 13.5px; }
+  table.ex th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
+                color: var(--hint); font-weight: 600; padding: 0 0 5px; }
+  table.ex th.num, table.ex td.num { text-align: right; white-space: nowrap; padding-left: 8px; }
+  table.ex td { padding: 5px 0; border-top: 1px solid var(--border); vertical-align: top; }
+  table.ex tr.note td { border-top: 0; padding: 0 0 5px; color: var(--hint); font-size: 12px; }
+  .circuit { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .deload { margin-top: 9px; padding: 8px 10px; border-radius: 9px; font-size: 12.5px;
+            background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--text); }
+  details.rules { margin-top: 12px; font-size: 12.5px; color: var(--hint); }
+  details.rules summary { cursor: pointer; }
+  details.rules ul { margin: 6px 0 0; padding-left: 18px; }
   svg.spark { width: 100%; height: 56px; display: block; margin-top: 8px; overflow: visible; }
 
   nav {
@@ -107,8 +122,10 @@
     <h1>Today</h1>
     <p class="sub" id="today-sub">—</p>
     <div id="today-macros"></div>
+    <h2>Today's meals</h2>
+    <div id="today-plan"></div>
     <h2>Session</h2>
-    <div class="card"><div id="today-session">—</div></div>
+    <div id="today-session"></div>
     <h2>Streaks</h2>
     <div class="grid" id="today-streaks"></div>
   </section>
@@ -126,8 +143,8 @@
   </section>
 
   <section id="view-shopping" hidden>
-    <h1>Shopping</h1>
-    <p class="sub">From this week's batch cook</p>
+    <h1>Ingredients</h1>
+    <p class="sub" id="shopping-sub">For today's meals</p>
     <div id="shopping-list"></div>
   </section>
 
@@ -142,7 +159,7 @@
   <button data-view="today" aria-current="true"><em>📊</em>Today</button>
   <button data-view="progress"><em>📈</em>Progress</button>
   <button data-view="recipes"><em>🍳</em>Recipes</button>
-  <button data-view="shopping"><em>🛒</em>Shopping</button>
+  <button data-view="shopping"><em>🛒</em>Ingredients</button>
   <button data-view="scorecard"><em>🏁</em>Score</button>
 </nav>
 
@@ -251,15 +268,178 @@ function sparkline(values) {
   </svg>`;
 }
 
+
+
+/* --- the day's workout, in full ----------------------------------------- */
+
+function workoutBlock(week) {
+  const idx = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/London' })).getDay();
+  const w = (window.WELLTRACK_WORKOUTS || {})[idx];
+  const rules = window.WELLTRACK_TRAINING_RULES || [];
+  if (!w) return `<div class="card"><strong>${dayInfo().session}</strong></div>`;
+
+  const deload = week && week % 4 === 0;
+  const row = (e) => `<tr>
+      <td>${esc(e.name)}</td>
+      <td class="num">${esc(e.sets || e.detail || '')}</td>
+      <td class="num">${esc(e.tempo || '')}</td>
+      <td class="num">${esc(e.rest || '')}</td>
+    </tr>${e.note ? `<tr class="note"><td colspan="4">${esc(e.note)}</td></tr>` : ''}`;
+
+  return `<div class="card">
+    <div class="row">
+      <strong>${esc(w.name)}</strong>
+      <span class="unit">${esc(w.duration)} · ${esc(w.intensity)}</span>
+    </div>
+    <div class="macros">${esc(w.focus)}</div>
+    ${deload ? `<div class="deload">Deload week — all weights down 40%, one less set per exercise. Mandatory, not optional.</div>` : ''}
+    ${w.note ? `<p class="sub" style="margin:9px 0 0">${esc(w.note)}</p>` : ''}
+    ${w.exercises?.length ? `<table class="ex">
+      <thead><tr><th>Exercise</th><th class="num">Sets×Reps</th><th class="num">Tempo</th><th class="num">Rest</th></tr></thead>
+      <tbody>${w.exercises.map(row).join('')}</tbody></table>` : ''}
+    ${w.circuit ? `<div class="circuit"><strong>${esc(w.circuit.title)}</strong>
+      <p class="sub" style="margin:3px 0 6px">${esc(w.circuit.note)}</p>
+      <table class="ex"><tbody>${w.circuit.items.map(row).join('')}</tbody></table></div>` : ''}
+    ${w.exercises?.length ? `<details class="rules"><summary>Training rules</summary><ul>${
+      rules.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></details>` : ''}
+  </div>`;
+}
+
+/* --- today's plan ---------------------------------------------------------
+ * Preference order:
+ *   1. wt_meal_plan_entries rows for today, once the coach writes them
+ *   2. a deterministic rotation over the recipe library
+ * The rotation is seeded on the date, so the plan is stable all day and moves
+ * on tomorrow, and each slot is drawn from the recipes closest to its protein
+ * target so four meals add up to the day's number.
+ * ------------------------------------------------------------------------ */
+
+const SLOTS = [
+  { key: 'breakfast', label: 'Breakfast', protein: 45 },
+  { key: 'lunch',     label: 'Lunch',     protein: 45 },
+  { key: 'dinner',    label: 'Dinner',    protein: 45 },
+  { key: 'snack',     label: 'Snack',     protein: 25 },
+];
+
+/** Days since epoch in London — the rotation seed. */
+function dayNumber() {
+  return Math.floor(new Date(todayISO()).getTime() / 864e5);
+}
+
+async function allRecipes() {
+  if (!RECIPES.length) {
+    const rows = await tryRows('wt_recipes?select=*&order=title');
+    RECIPES = rows || [];
+  }
+  return RECIPES;
+}
+
+/** Recipes a slot may draw on. Marinades and bare sides are never a meal. */
+function poolFor(slot, recipes) {
+  const usable = recipes.filter((r) =>
+    r.calories_per_serving != null &&
+    !(r.tags || []).includes('marinade') &&
+    !(r.tags || []).includes('side'));
+
+  let pool = usable.filter((r) => r.meal_type === slot.key);
+
+  // Lunch and dinner are interchangeable when one of them is thin
+  if (pool.length < 3 && (slot.key === 'lunch' || slot.key === 'dinner')) {
+    pool = usable.filter((r) => r.meal_type === 'lunch' || r.meal_type === 'dinner');
+  }
+  if (!pool.length) pool = usable;
+
+  // Closest to this slot's protein target first, then rotate within the best few
+  return pool
+    .slice()
+    .sort((a, b) => Math.abs((a.protein_per_serving || 0) - slot.protein) -
+                    Math.abs((b.protein_per_serving || 0) - slot.protein));
+}
+
+async function todaysPlan() {
+  const recipes = await allRecipes();
+  if (!recipes.length) return null;
+
+  // 1. the coach's morning plan wins
+  const byId = new Map(recipes.map((r) => [r.id, r]));
+  const byTitle = new Map(recipes.map((r) => [r.title.toLowerCase(), r]));
+
+  const coach = await tryRows(
+    `wt_coach_daily_plan?select=slot,recipe_id,recipe_title,note&date=eq.${todayISO()}`);
+  if (coach && coach.length) {
+    const plan = SLOTS.map((slot) => {
+      const row = coach.find((e) => (e.slot || '').toLowerCase() === slot.key);
+      if (!row) return { slot, recipe: null, source: 'coach' };
+      // recipe_id is authoritative; fall back to the title the coach wrote
+      const recipe = (row.recipe_id && byId.get(row.recipe_id)) ||
+                     byTitle.get((row.recipe_title || '').toLowerCase()) ||
+                     { id: `t-${slot.key}`, title: row.recipe_title, tags: [] };
+      return { slot, recipe, source: 'coach', note: row.note };
+    });
+    if (plan.some((p) => p.recipe)) return plan;
+  }
+
+  // 2. the Flutter app's own plan table, if it is ever populated
+  const stored = await tryRows(
+    `wt_meal_plan_entries?select=slot,recipe_id&date=eq.${todayISO()}`);
+  if (stored && stored.length) {
+    const plan = SLOTS.map((slot) => {
+      const row = stored.find((e) => (e.slot || '').toLowerCase() === slot.key);
+      return { slot, recipe: row ? byId.get(row.recipe_id) : null, source: 'planned' };
+    });
+    if (plan.some((p) => p.recipe)) return plan;
+  }
+
+  // 3. deterministic rotation — nothing saved yet today
+  const seed = dayNumber();
+  const used = new Set();
+  return SLOTS.map((slot, i) => {
+    const pool = poolFor(slot, recipes);
+    const top = pool.slice(0, Math.max(3, Math.min(6, pool.length)));
+    let pick = null;
+    for (let k = 0; k < top.length; k++) {
+      const cand = top[(seed + i * 2 + k) % top.length];
+      if (!used.has(cand.id)) { pick = cand; break; }
+    }
+    pick = pick || top[(seed + i) % Math.max(top.length, 1)] || null;
+    if (pick) used.add(pick.id);
+    return { slot, recipe: pick, source: 'suggested' };
+  });
+}
+
+function planCard({ slot, recipe, source, note }) {
+  if (!recipe) {
+    return `<div class="card"><div class="row"><strong>${slot.label}</strong>
+      <span class="unit">nothing suitable yet</span></div></div>`;
+  }
+  return `<div class="card recipe" data-id="${recipe.id}">
+    <div class="row">
+      <div><div class="k" style="color:var(--hint);font-size:12px">${slot.label}${
+        source === 'suggested' ? ' · suggested' : ' · from Coach'}</div>
+        <h3>${esc(recipe.title)}</h3></div>
+      <span class="unit">${recipe.calories_per_serving ?? '—'} kcal</span>
+    </div>
+    <div class="macros">${recipe.protein_per_serving != null
+      ? `${recipe.protein_per_serving}g protein · ${recipe.carbs_per_serving}g carbs · ${recipe.fat_per_serving}g fat`
+      : 'macros not recorded for this one'}${note ? ` · ${esc(note)}` : ''}</div>
+    <div class="detail">
+      ${(recipe.ingredients || []).length ? `<strong>Ingredients</strong><ul>${
+        recipe.ingredients.map((g) => `<li>${esc([g.quantity, g.unit, g.item].filter(Boolean).join(' '))}</li>`).join('')
+      }</ul>` : ''}
+      ${(recipe.instructions || []).length ? `<strong style="display:block;margin-top:10px">Method</strong><ol>${
+        recipe.instructions.map((x) => `<li>${esc(x.instruction || x)}</li>`).join('')
+      }</ol>` : ''}
+    </div>
+  </div>`;
+}
+
 /* --- views ---------------------------------------------------------------- */
 
 async function renderToday() {
   const d = dayInfo(), week = planWeek();
   el('today-sub').textContent =
     `${d.name} · ${d.type} day · ${week ? `week ${week} of 24` : 'plan starts Mon 26 Oct'}`;
-  el('today-session').innerHTML =
-    `<strong>${d.session}</strong>` +
-    (week && week % 4 === 0 ? `<div class="macros">Deload week — weights down 40%, one less set</div>` : '');
+  el('today-session').innerHTML = workoutBlock(week);
 
   const summary = await tryRows(`wt_daily_nutrition_summary?select=*&summary_date=eq.${todayISO()}&limit=1`);
   if (summary === null) {
@@ -271,6 +451,25 @@ async function renderToday() {
       macroCard('Calories', t.total_calories || 0, d.kcal, ' kcal') +
       macroCard('Protein', t.total_protein_g || 0, d.protein, 'g') +
       (summary.length ? '' : `<p class="empty">Nothing logged yet today.</p>`);
+  }
+
+  const plan = await todaysPlan();
+  if (!plan) {
+    el('today-plan').innerHTML = `<p class="empty">No recipes available to plan from.</p>`;
+  } else {
+    const planned = plan.filter((p) => p.recipe);
+    const kcal = planned.reduce((a, p) => a + (p.recipe.calories_per_serving || 0), 0);
+    const prot = planned.reduce((a, p) => a + (p.recipe.protein_per_serving || 0), 0);
+    el('today-plan').innerHTML = plan.map(planCard).join('') +
+      `<div class="card"><div class="row"><strong>Plan total</strong>
+        <span>${Math.round(kcal)}<span class="unit"> / ${d.kcal} kcal</span> ·
+              ${Math.round(prot)}<span class="unit"> / ${d.protein}g P</span></span>
+      </div></div>`;
+    el('today-plan').querySelectorAll('.recipe').forEach((node) =>
+      node.addEventListener('click', () => {
+        node.classList.toggle('open');
+        TG?.HapticFeedback?.selectionChanged?.();
+      }));
   }
 
   const energy = await tryRows('wt_energy_scores?select=date,score&order=date.desc&limit=7');
@@ -374,49 +573,64 @@ function drawRecipes(q = '') {
   });
 }
 
-/** Shopping list is derived from the batch-cook recipes, grouped for the aisle. */
+/** Ingredients for today's planned meals, grouped for the aisle. */
 async function renderShopping() {
-  if (!RECIPES.length) {
-    const rows = await tryRows('wt_recipes?select=*&order=title');
-    if (rows === null) { el('shopping-list').innerHTML = `<div class="err">Couldn't load recipes.</div>`; return; }
-    RECIPES = rows;
+  const plan = await todaysPlan();
+  const meals = (plan || []).filter((p) => p.recipe);
+
+  if (!meals.length) {
+    el('shopping-list').innerHTML = `<p class="empty">No meals planned for today yet.</p>`;
+    return;
   }
 
-  const batch = RECIPES.filter((r) => (r.tags || []).includes('batch-protein') || (r.tags || []).includes('marinade'));
-  if (!batch.length) { el('shopping-list').innerHTML = `<p class="empty">No batch-cook recipes yet.</p>`; return; }
+  el('shopping-sub').textContent =
+    `For today's ${meals.length} meals: ${meals.map((m) => m.recipe.title).join(', ')}`;
 
   const GROUPS = {
-    Proteins: /chicken|salmon|turkey|beef|prawn|tuna|egg|mackerel/i,
-    Produce:  /pepper|onion|garlic|spinach|tomato|lemon|lime|plantain|avocado|herb|coriander|parsley|dill|thyme|chive|rocket|ginger|beetroot|blueberr/i,
-    Staples:  /rice|oat|bread|bean|lentil|chickpea|flour|honey|oil|vinegar|soy|stock|mirin|seed|nut|yoghurt|milk|cheese|feta|butter/i,
+    Proteins: /chicken|salmon|turkey|beef|prawn|tuna|egg|mackerel|mince|yoghurt|feta|cheese|milk|protein powder/i,
+    Produce:  /pepper|onion|garlic|spinach|tomato|lemon|lime|plantain|avocado|herb|coriander|parsley|dill|thyme|chive|rocket|ginger|beetroot|blueberr|banana|broccoli|mushroom/i,
+    Cupboard: /rice|oat|bread|bean|lentil|chickpea|flour|honey|oil|vinegar|soy|stock|mirin|seed|nut|salt|pepper|paprika|cumin|oregano|cinnamon|nutmeg|allspice|cayenne|curry|powder|puree|marinade|sofrito/i,
   };
 
-  const buckets = { Proteins: new Set(), Produce: new Set(), Staples: new Set(), Other: new Set() };
-  for (const r of batch) {
-    for (const g of r.ingredients || []) {
-      const name = g.item || '';
+  // Same ingredient across two meals is one line, with the portions added up
+  const items = new Map();
+  for (const { recipe, slot } of meals) {
+    for (const g of recipe.ingredients || []) {
+      const name = (g.item || '').replace(/,.*$/, '').trim();
+      if (!name) continue;
+      const keyName = name.toLowerCase();
       const group = Object.keys(GROUPS).find((k) => GROUPS[k].test(name)) || 'Other';
-      buckets[group].add(name.replace(/,.*$/, '').trim());
+      const prev = items.get(keyName) || { name, group, parts: [], meals: new Set() };
+      if (g.quantity) prev.parts.push(`${g.quantity}${g.unit && g.unit !== 'whole' ? ' ' + g.unit : ''}`);
+      prev.meals.add(slot.label);
+      items.set(keyName, prev);
     }
   }
 
-  const saved = JSON.parse(localStorage.getItem('wt-shopping') || '{}');
-  el('shopping-list').innerHTML = Object.entries(buckets)
-    .filter(([, items]) => items.size)
-    .map(([group, items]) => `<h2>${group}</h2><div class="card">${
-      [...items].sort().map((item) => {
-        const id = `s-${btoa(unescape(encodeURIComponent(item))).replace(/=/g, '')}`;
-        const done = saved[id] ? ' done' : '';
-        return `<label class="check${done}"><input type="checkbox" id="${id}"${saved[id] ? ' checked' : ''}><span>${esc(item)}</span></label>`;
+  const saved = JSON.parse(localStorage.getItem('wt-shopping-' + todayISO()) || '{}');
+  const byGroup = {};
+  for (const it of items.values()) (byGroup[it.group] ||= []).push(it);
+
+  el('shopping-list').innerHTML = ['Proteins', 'Produce', 'Cupboard', 'Other']
+    .filter((g) => byGroup[g]?.length)
+    .map((g) => `<h2>${g}</h2><div class="card">${
+      byGroup[g].sort((a, b) => a.name.localeCompare(b.name)).map((it) => {
+        const id = 's-' + btoa(unescape(encodeURIComponent(it.name))).replace(/=/g, '');
+        const qty = it.parts.length ? ` — ${it.parts.join(' + ')}` : '';
+        return `<label class="check${saved[id] ? ' done' : ''}">
+          <input type="checkbox" id="${id}"${saved[id] ? ' checked' : ''}>
+          <span>${esc(it.name)}<em class="qty">${esc(qty)}</em>
+          <em class="for">${esc([...it.meals].join(', '))}</em></span></label>`;
       }).join('')
     }</div>`).join('');
 
   el('shopping-list').querySelectorAll('input[type=checkbox]').forEach((box) => {
     box.addEventListener('change', () => {
       box.closest('label').classList.toggle('done', box.checked);
-      const state = JSON.parse(localStorage.getItem('wt-shopping') || '{}');
+      const key = 'wt-shopping-' + todayISO();
+      const state = JSON.parse(localStorage.getItem(key) || '{}');
       state[box.id] = box.checked;
-      localStorage.setItem('wt-shopping', JSON.stringify(state));
+      localStorage.setItem(key, JSON.stringify(state));
       TG?.HapticFeedback?.impactOccurred?.('light');
     });
   });
@@ -464,7 +678,6 @@ function show(name) {
   document.querySelectorAll('nav button').forEach((b) =>
     b.setAttribute('aria-current', String(b.dataset.view === name)));
   VIEWS[name]();
-  try { localStorage.setItem('wt-tab', name); } catch {}
 }
 
 document.querySelectorAll('nav button').forEach((b) =>
@@ -490,9 +703,7 @@ if (!CFG.url || !CFG.anonKey) {
   document.querySelector('main').innerHTML =
     `<h1>Not configured</h1><div class="err">Copy <code>config.example.js</code> to <code>config.js</code> and fill in your Supabase URL and anon key.</div>`;
 } else {
-  let start = 'today';
-  try { start = localStorage.getItem('wt-tab') || 'today'; } catch {}
-  show(VIEWS[start] ? start : 'today');
+  show('today');
 }
 </script>
 </body>
