@@ -83,6 +83,30 @@
   label.check em.qty { font-style: normal; color: var(--hint); }
   label.check em.for { display: block; font-style: normal; font-size: 11.5px; color: var(--hint); }
 
+  .acts { display: flex; gap: 6px; margin-top: 11px; }
+  .acts button {
+    flex: 1; border: 0; border-radius: 9px; padding: 8px 4px; cursor: pointer;
+    background: var(--bg); color: var(--text); font: 600 12.5px/1 inherit;
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+  .acts button[aria-pressed="true"] { background: var(--ok); color: #fff; box-shadow: none; }
+  .acts button.rate[aria-pressed="true"] { background: var(--button); color: var(--button-text); }
+  .acts button:disabled { opacity: .5; }
+
+  .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.45);
+           display: flex; align-items: flex-end; z-index: 40; }
+  .sheet[hidden] { display: none; }
+  .sheet > div { background: var(--bg); width: 100%; max-height: 78vh; overflow-y: auto;
+                 border-radius: 16px 16px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); }
+  .sheet h3 { margin: 0 0 4px; font-size: 16px; }
+  .sheet .opt { width: 100%; text-align: left; border: 0; background: var(--secondary-bg);
+                border-radius: 11px; padding: 11px 13px; margin-top: 8px; cursor: pointer;
+                color: var(--text); font: inherit; }
+  .sheet .opt .m { color: var(--hint); font-size: 12.5px; margin-top: 2px; }
+  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 86px;
+           background: var(--text); color: var(--bg); padding: 9px 15px; border-radius: 99px;
+           font-size: 13px; z-index: 50; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  .toast.show { opacity: 1; }
   .seg { display: flex; gap: 6px; margin-bottom: 12px; }
   .seg button {
     flex: 1; border: 0; border-radius: 9px; padding: 8px 4px; cursor: pointer;
@@ -187,6 +211,13 @@
 
 
 </main>
+
+<div class="sheet" id="swap-sheet" hidden><div>
+  <h3 id="swap-title">Swap meal</h3>
+  <p class="sub" id="swap-sub">Pick a replacement</p>
+  <div id="swap-options"></div>
+</div></div>
+<div class="toast" id="toast"></div>
 
 <nav>
   <button data-view="today" aria-current="true"><em>📊</em>Today</button>
@@ -398,7 +429,7 @@ async function todaysPlan() {
   const byTitle = new Map(recipes.map((r) => [r.title.toLowerCase(), r]));
 
   const coach = await tryRows(
-    `wt_coach_daily_plan?select=slot,recipe_id,recipe_title,note&date=eq.${todayISO()}`);
+    `wt_coach_daily_plan?select=slot,recipe_id,recipe_title,note,eaten,portion&date=eq.${todayISO()}`);
   if (coach && coach.length) {
     const plan = SLOTS.map((slot) => {
       const row = coach.find((e) => (e.slot || '').toLowerCase() === slot.key);
@@ -407,7 +438,8 @@ async function todaysPlan() {
       const recipe = (row.recipe_id && byId.get(row.recipe_id)) ||
                      byTitle.get((row.recipe_title || '').toLowerCase()) ||
                      { id: `t-${slot.key}`, title: row.recipe_title, tags: [] };
-      return { slot, recipe, source: 'coach', note: row.note };
+      return { slot, recipe, source: 'coach', note: row.note,
+               eaten: Boolean(row.eaten), portion: Number(row.portion) || 1 };
     });
     if (plan.some((p) => p.recipe)) return plan;
   }
@@ -440,7 +472,7 @@ async function todaysPlan() {
   });
 }
 
-function planCard({ slot, recipe, source, note }) {
+function planCard({ slot, recipe, source, note, eaten, verdict }) {
   if (!recipe) {
     return `<div class="card"><div class="row"><strong>${slot.label}</strong>
       <span class="unit">nothing suitable yet</span></div></div>`;
@@ -449,12 +481,18 @@ function planCard({ slot, recipe, source, note }) {
     <div class="row">
       <div><div class="k" style="color:var(--hint);font-size:12px">${slot.label}${
         source === 'suggested' ? ' · suggested' : ' · from Coach'}</div>
-        <h3>${esc(recipe.title)}</h3></div>
+        <h3>${esc(recipe.title)}${recipe.portion && recipe.portion !== 1 ? ` <span class="unit">×${recipe.portion}</span>` : ''}</h3></div>
       <span class="unit">${recipe.calories_per_serving ?? '—'} kcal</span>
     </div>
     <div class="macros">${recipe.protein_per_serving != null
       ? `${recipe.protein_per_serving}g protein · ${recipe.carbs_per_serving}g carbs · ${recipe.fat_per_serving}g fat`
       : 'macros not recorded for this one'}${note ? ` · ${esc(note)}` : ''}</div>
+    <div class="acts" data-slot="${slot.key}" data-recipe="${recipe.id || ''}">
+      <button class="ate" aria-pressed="${eaten ? 'true' : 'false'}">${eaten ? '✓ Eaten' : 'Ate it'}</button>
+      <button class="swap">⇄ Swap</button>
+      <button class="rate like" aria-pressed="${verdict === 'like'}">👍</button>
+      <button class="rate dislike" aria-pressed="${verdict === 'dislike'}">👎</button>
+    </div>
     <div class="detail">
       ${(recipe.ingredients || []).length ? `<strong>Ingredients</strong><ul>${
         recipe.ingredients.map((g) => `<li>${esc([g.quantity, g.unit, g.item].filter(Boolean).join(' '))}</li>`).join('')
@@ -466,6 +504,134 @@ function planCard({ slot, recipe, source, note }) {
   </div>`;
 }
 
+
+
+/* --- writes ---------------------------------------------------------------
+ * The page holds only the anon key, so every write goes to the wt-action edge
+ * function with Telegram's signed initData. Outside Telegram there is no
+ * initData, so the buttons say so rather than failing silently.
+ * ------------------------------------------------------------------------ */
+
+const INIT_DATA = TG?.initData || '';
+const CAN_WRITE = Boolean(INIT_DATA);
+
+function toast(msg) {
+  const t = el('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => t.classList.remove('show'), 2200);
+}
+
+async function act(payload) {
+  if (!CAN_WRITE) {
+    toast('Open this from the Telegram bot to make changes');
+    return null;
+  }
+  try {
+    const res = await fetch(`${CFG.url}/functions/v1/wt-action`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...payload, initData: INIT_DATA }),
+    });
+    const body = await res.json();
+    if (!res.ok || body.error) throw new Error(body.error || `HTTP ${res.status}`);
+    return body;
+  } catch (err) {
+    toast(`Could not save: ${err.message}`);
+    return null;
+  }
+}
+
+/** Alternatives for a slot, worst-rated last, excluding what is already on today. */
+async function swapOptions(slotKey, excludeIds) {
+  const recipes = await allRecipes();
+  const feedback = await tryRows('wt_recipe_feedback?select=recipe_id,verdict') || [];
+  const verdicts = new Map(feedback.map((f) => [f.recipe_id, f.verdict]));
+  const want = slotKey === 'snack' ? 25 : 45;
+
+  let pool = recipes.filter((r) =>
+    r.calories_per_serving != null &&
+    !(r.tags || []).includes('marinade') &&
+    !excludeIds.includes(r.id) &&
+    (r.meal_type === slotKey ||
+     (slotKey !== 'snack' && slotKey !== 'breakfast' &&
+      (r.meal_type === 'lunch' || r.meal_type === 'dinner'))));
+  if (!pool.length) pool = recipes.filter((r) => r.calories_per_serving != null && !excludeIds.includes(r.id));
+
+  return pool.sort((a, b) => {
+    const va = verdicts.get(a.id), vb = verdicts.get(b.id);
+    const rank = (v) => (v === 'like' ? 0 : v === 'dislike' ? 2 : 1);
+    if (rank(va) !== rank(vb)) return rank(va) - rank(vb);
+    return Math.abs((a.protein_per_serving || 0) - want) - Math.abs((b.protein_per_serving || 0) - want);
+  });
+}
+
+function openSwap(slot, currentIds, onPick) {
+  const sheet = el('swap-sheet');
+  el('swap-title').textContent = `Swap ${slot.label.toLowerCase()}`;
+  el('swap-sub').textContent = 'Liked recipes first, disliked last';
+  el('swap-options').innerHTML = '<p class="empty">Loading…</p>';
+  sheet.hidden = false;
+
+  swapOptions(slot.key, currentIds).then((opts) => {
+    el('swap-options').innerHTML = opts.slice(0, 25).map((r) => `
+      <button class="opt" data-id="${r.id}">
+        <div>${esc(r.title)}</div>
+        <div class="m">${r.calories_per_serving} kcal · ${r.protein_per_serving}g protein</div>
+      </button>`).join('');
+    el('swap-options').querySelectorAll('.opt').forEach((b) =>
+      b.addEventListener('click', () => { sheet.hidden = true; onPick(b.dataset.id); }));
+  });
+}
+
+el('swap-sheet').addEventListener('click', (e) => {
+  if (e.target.id === 'swap-sheet') el('swap-sheet').hidden = true;
+});
+
+
+/** Wire Ate it / Swap / 👍 / 👎 on today's cards. */
+function wireMealActions(plan) {
+  const currentIds = plan.filter((p) => p.recipe?.id).map((p) => p.recipe.id);
+
+  el('today-plan').querySelectorAll('.acts').forEach((bar) => {
+    const slotKey = bar.dataset.slot;
+    const recipeId = bar.dataset.recipe;
+    const entry = plan.find((p) => p.slot.key === slotKey);
+    if (!entry) return;
+
+    bar.querySelector('.ate').addEventListener('click', async () => {
+      const now = bar.querySelector('.ate').getAttribute('aria-pressed') === 'true';
+      const res = await act({ action: now ? 'uneat' : 'eat', slot: slotKey });
+      if (!res) return;
+      TG?.HapticFeedback?.impactOccurred?.('medium');
+      toast(now ? 'Unmarked' : `${entry.slot.label} logged`);
+      renderToday();
+    });
+
+    bar.querySelector('.swap').addEventListener('click', () => {
+      openSwap(entry.slot, currentIds, async (newId) => {
+        const res = await act({ action: 'swap', slot: slotKey, recipeId: newId });
+        if (!res) return;
+        TG?.HapticFeedback?.notificationOccurred?.('success');
+        toast(`Swapped to ${res.title}`);
+        renderToday();
+      });
+    });
+
+    bar.querySelectorAll('.rate').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!recipeId) return toast('No recipe record to rate');
+        const verdict = btn.classList.contains('like') ? 'like' : 'dislike';
+        const res = await act({ action: 'rate', recipeId, verdict });
+        if (!res) return;
+        TG?.HapticFeedback?.selectionChanged?.();
+        toast(verdict === 'like' ? 'Noted — more of these' : 'Noted — fewer of these');
+        renderToday();
+      });
+    });
+  });
+}
 
 /* --- a plan for any date range ------------------------------------------ */
 
@@ -581,35 +747,43 @@ async function renderToday() {
     `${d.name} · ${d.type} day · ${week ? `week ${week} of 24` : 'plan starts Mon 26 Oct'}`;
   el('today-session').innerHTML = workoutBlock(week);
 
-  const summary = await tryRows(`wt_daily_nutrition_summary?select=*&summary_date=eq.${todayISO()}&limit=1`);
-  if (summary === null) {
-    el('today-macros').innerHTML =
-      `<div class="err">Can't read today's totals. The table may not exist yet, or row-level security is blocking an unauthenticated read.</div>`;
-  } else {
-    const t = summary[0] || {};
-    el('today-macros').innerHTML =
-      macroCard('Calories', t.total_calories || 0, d.kcal, ' kcal') +
-      macroCard('Protein', t.total_protein_g || 0, d.protein, 'g') +
-      (summary.length ? '' : `<p class="empty">Nothing logged yet today.</p>`);
-  }
+  // Consumed is whatever is ticked off on today's plan — the plan rows are the
+  // record, so the bars and the tick marks can never disagree.
+  const planNow = await todaysPlan();
+  const eatenMeals = (planNow || []).filter((p) => p.eaten && p.recipe);
+  const ate = eatenMeals.reduce((a, p) => ({
+    kcal: a.kcal + (p.recipe.calories_per_serving || 0) * (p.portion || 1),
+    prot: a.prot + (p.recipe.protein_per_serving || 0) * (p.portion || 1),
+  }), { kcal: 0, prot: 0 });
 
-  const plan = await todaysPlan();
+  el('today-macros').innerHTML =
+    macroCard('Calories', ate.kcal, d.kcal, ' kcal') +
+    macroCard('Protein', ate.prot, d.protein, 'g') +
+    (eatenMeals.length ? '' : `<p class="empty">Nothing ticked off yet today.</p>`);
+
+  const plan = planNow;
+  const feedback = await tryRows('wt_recipe_feedback?select=recipe_id,verdict') || [];
+  const verdicts = new Map(feedback.map((f) => [f.recipe_id, f.verdict]));
   if (!plan) {
     el('today-plan').innerHTML = `<p class="empty">No recipes available to plan from.</p>`;
   } else {
     const planned = plan.filter((p) => p.recipe);
     const kcal = planned.reduce((a, p) => a + (p.recipe.calories_per_serving || 0), 0);
     const prot = planned.reduce((a, p) => a + (p.recipe.protein_per_serving || 0), 0);
-    el('today-plan').innerHTML = plan.map(planCard).join('') +
+    el('today-plan').innerHTML = plan.map((p) =>
+      planCard({ ...p, verdict: verdicts.get(p.recipe?.id) })).join('') +
       `<div class="card"><div class="row"><strong>Plan total</strong>
         <span>${Math.round(kcal)}<span class="unit"> / ${d.kcal} kcal</span> ·
               ${Math.round(prot)}<span class="unit"> / ${d.protein}g P</span></span>
       </div></div>`;
     el('today-plan').querySelectorAll('.recipe').forEach((node) =>
-      node.addEventListener('click', () => {
+      node.addEventListener('click', (e) => {
+        if (e.target.closest('.acts')) return;   // buttons are not "expand"
         node.classList.toggle('open');
         TG?.HapticFeedback?.selectionChanged?.();
       }));
+
+    wireMealActions(plan);
   }
 
   const energy = await tryRows('wt_energy_scores?select=date,score&order=date.desc&limit=7');
