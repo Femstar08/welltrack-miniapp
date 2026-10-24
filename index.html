@@ -74,6 +74,12 @@ details.m-nest-d > summary .unit { display: block; color: var(--ink-muted); marg
 .m-subitem:first-of-type { border-top: 0 }
 .m-jar--todo { border: 1px solid var(--warn) }
 
+/* the cook order leads the session — it is what you follow while standing
+   in the kitchen; the recipes below it are the reference */
+.m-instr { background: var(--surface-inset); border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4) }
+.m-instr .m-steps { margin-top: var(--space-2) }
+
 /* "BREAKFAST" does not fit the design's 58px slot column and was overrunning
    the meal name beside it */
 .m-day__slot { width: 78px; white-space: nowrap }
@@ -840,6 +846,11 @@ async function renderBatch() {
       ${head}
       <div class="m-batch__meta caption"><span>Hands-on ~${s.handsOn} min</span><span>In the kitchen ~${s.elapsed} min</span><span>${s.totalPortions} portions</span></div>
 
+      ${s.items.length ? `<div class="m-instr">
+        <h3 class="m-sect label m-up" style="margin:0">Instructions</h3>
+        <ol class="m-steps body">${s.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
+      </div>` : ''}
+
       ${s.marinadeJobs?.length ? `<div class="m-jar m-block"><strong class="title-sm">Jars</strong>
         <div class="caption m-muted">Marinades keep a week or two — only made when stock runs out</div>
         ${s.marinadeJobs.map((j) => `<details class="m-nest-d${j.makeJar ? '' : ' stocked'}"
@@ -863,7 +874,6 @@ async function renderBatch() {
           ${recipeDetail(it.recipe, it.batches)}</details>
       </div>`).join('')}
 
-      ${s.items.length ? `<ol class="m-steps body">${s.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}
 
       ${s.prepAhead?.length ? `<div class="m-jar m-block">
         <strong class="title-sm">Prep ahead for the fresh meals<span class="unit m-muted"> · ~${s.prepMinutes} min</span></strong>
