@@ -114,6 +114,15 @@
     font: 600 12.5px/1 inherit;
   }
   .seg button[aria-pressed="true"] { background: var(--button); color: var(--button-text); }
+  .slotline.tappable { cursor: pointer; }
+  .slotline.tappable .t::after { content: ' ›'; color: var(--hint); }
+  .slotline.open .t::after { content: ' ⌄'; }
+  .slotdetail { padding: 4px 0 12px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
+  .slotdetail ul, .slotdetail ol { margin: 6px 0 0; padding-left: 20px; }
+  .slotdetail li { margin-bottom: 4px; }
+  details.sub-recipe { margin-top: 12px; padding: 10px 12px; border-radius: 10px;
+                       background: var(--bg); box-shadow: inset 0 0 0 1px var(--border); }
+  details.sub-recipe summary { cursor: pointer; font-weight: 600; font-size: 13px; }
   .batch .row + .row { margin-top: 2px; }
   .batch ol { margin: 10px 0 0; padding-left: 20px; font-size: 13.5px; }
   .batch ol li { margin-bottom: 5px; }
@@ -504,18 +513,66 @@ function planCard({ slot, recipe, source, note, eaten, verdict }) {
       <button class="rate like" aria-pressed="${verdict === 'like'}">👍</button>
       <button class="rate dislike" aria-pressed="${verdict === 'dislike'}">👎</button>
     </div>
-    <div class="detail">
-      ${(recipe.ingredients || []).length ? `<strong>Ingredients</strong><ul>${
-        recipe.ingredients.map((g) => `<li>${esc([g.quantity, g.unit, g.item].filter(Boolean).join(' '))}</li>`).join('')
-      }</ul>` : ''}
-      ${(recipe.instructions || []).length ? `<strong style="display:block;margin-top:10px">Method</strong><ol>${
-        recipe.instructions.map((x) => `<li>${esc(x.instruction || x)}</li>`).join('')
-      }</ol>` : ''}
-    </div>
+    <div class="detail">${recipeDetail(recipe, recipe.portion || 1)}</div>
   </div>`;
 }
 
 
+
+
+/* --- one recipe renderer, used by Today, Plan and the batch list ---------- */
+
+/** Marinades a recipe names in its ingredients, resolved to full recipes. */
+function marinadesOf(recipe) {
+  const byTitle = new Map(RECIPES.map((r) => [r.title.toLowerCase(), r]));
+  const out = [];
+  for (const ing of recipe.ingredients || []) {
+    const m = /\(see ([^)]+)\)/i.exec(ing.item || '');
+    if (!m) continue;
+    const hit = byTitle.get(m[1].trim().toLowerCase());
+    if (hit && !out.includes(hit)) out.push(hit);
+  }
+  return out;
+}
+
+const scaleQty = (q, portion) =>
+  q == null ? '' : String(Math.round(q * portion * 100) / 100);
+
+function ingredientList(recipe, portion = 1) {
+  if (!(recipe.ingredients || []).length) return '';
+  return `<strong>Ingredients${portion !== 1 ? ` (×${portion})` : ''}</strong><ul>${
+    recipe.ingredients.map((g) => `<li>${esc(
+      [scaleQty(g.quantity, portion), g.unit && g.unit !== 'whole' ? g.unit : '', g.item]
+        .filter(Boolean).join(' '))}</li>`).join('')}</ul>`;
+}
+
+function methodList(recipe) {
+  if (!(recipe.instructions || []).length) {
+    return '<p class="empty">No method recorded for this one.</p>';
+  }
+  return `<strong style="display:block;margin-top:10px">Method</strong><ol>${
+    recipe.instructions.map((x) => `<li>${esc(x.instruction || x)}</li>`).join('')}</ol>`;
+}
+
+/**
+ * Full detail for a recipe: scaled ingredients, method, and any marinade it
+ * depends on spelled out inline — those are repeat jobs and it is no use
+ * knowing you need jerk marinade without being told how to make it.
+ */
+function recipeDetail(recipe, portion = 1) {
+  const marinades = marinadesOf(recipe);
+  return `
+    ${ingredientList(recipe, portion)}
+    ${methodList(recipe)}
+    ${marinades.map((m) => `
+      <details class="sub-recipe">
+        <summary>${esc(m.title)} — how to make it</summary>
+        ${ingredientList(m, 1)}
+        ${methodList(m)}
+        <p class="sub" style="margin:8px 0 0">Makes ${m.servings} tbsp. Keeps in a jar in the fridge,
+          so make it once and use it across the week.</p>
+      </details>`).join('')}`;
+}
 
 /* --- writes ---------------------------------------------------------------
  * The page holds only the anon key, so every write goes to the wt-action edge
@@ -752,19 +809,50 @@ async function renderBatch() {
       <div class="macros">Hands-on ~${s.handsOn} min · in the kitchen ~${s.elapsed} min · ${s.totalPortions} portions</div>
 
       ${s.marinades.length ? `<div class="item"><strong>Marinades first</strong>
-        <div class="m">${s.marinades.map((m) => esc(m.title)).join(', ')}</div></div>` : ''}
+        <div class="m">Make these before anything else — they keep in a jar all week</div>
+        ${s.marinades.map((m) => `<details class="sub-recipe">
+          <summary>${esc(m.title)} <span class="unit">· ${m.prep_time_min || 5} min · makes ${m.servings}</span></summary>
+          ${ingredientList(m, 1)}${methodList(m)}
+        </details>`).join('')}
+      </div>` : ''}
 
       ${s.items.map((it) => `<div class="item">
         <strong>${esc(it.title)}</strong>${it.batches > 1 ? ` <span class="unit">×${it.batches} batches</span>` : ''}
         <div class="m">${Math.ceil(it.portions)} portions for ${esc(it.days.join(', '))} ·
           ${it.prepMin} min prep · ${it.cookMin} min cook</div>
         ${it.storage ? `<div class="m">${esc(it.storage)}</div>` : ''}
+        <details class="sub-recipe"><summary>Recipe${it.batches > 1 ? ` — quantities ×${it.batches}` : ''}</summary>
+          ${recipeDetail(it.recipe, it.batches)}</details>
       </div>`).join('')}
 
-      <ol>${s.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>
+      ${s.items.length ? `<ol>${s.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}
 
-      ${s.freshOnTheDay?.length ? `<div class="fresh">Made fresh on the day:
-        ${s.freshOnTheDay.map(esc).join(', ')}</div>` : ''}
+      ${s.prepAhead?.length ? `<div class="fresh" style="color:var(--text)">
+        <strong>Prep ahead for the fresh meals</strong>
+        <span class="unit"> · ~${s.prepMinutes} min</span>
+        ${s.prepAhead.map((f) => `<div class="item">
+          <strong>${esc(f.title)}</strong>
+          <div class="m">${esc(f.days.join(', '))}</div>
+          <ul style="margin:5px 0 0;padding-left:19px">${
+            f.tasks.map((t) => `<li>${esc(t.text)}${
+              t.kind === 'marinade' && t.marinade
+                ? `<details class="sub-recipe"><summary>${esc(t.marinade.title)} — how to make it</summary>
+                   ${ingredientList(t.marinade, 1)}${methodList(t.marinade)}</details>`
+                : ''}</li>`).join('')}</ul>
+          <details class="sub-recipe"><summary>Full recipe · ${f.prepMin} min prep${
+            f.cookMin ? ` + ${f.cookMin} min cook` : ''}</summary>${recipeDetail(f.recipe, 1)}</details>
+        </div>`).join('')}
+      </div>` : ''}
+
+      ${s.nothingToPrep?.length ? `<div class="fresh" style="color:var(--text)">
+        <strong>Cooked on the day</strong>
+        <span class="unit"> · nothing to prep ahead, but here is the work</span>
+        ${s.nothingToPrep.map((f) => `<details class="sub-recipe">
+          <summary>${esc(f.title)} <span class="unit">· ${esc(f.days.join(', '))} · ${
+            f.prepMin} min prep${f.cookMin ? ` + ${f.cookMin} min cook` : ''}</span></summary>
+          ${recipeDetail(f.recipe, 1)}
+        </details>`).join('')}
+      </div>` : ''}
     </div>`;
   }).join('');
 }
@@ -796,15 +884,27 @@ async function renderPlan() {
         <strong>${dayLabel(d.date)} · <span class="unit">${d.meta.type}</span></strong>
         <span class="totals${short ? ' short' : ''}">${d.kcal}/${d.meta.kcal} kcal · ${d.protein}/${d.meta.protein}g P</span>
       </div>
-      <div class="card">${d.entries.map((e) => `
-        <div class="slotline">
+      <div class="card">${d.entries.map((e, idx) => `
+        <div class="slotline${e.recipe ? ' tappable' : ''}" data-day="${d.date}" data-i="${idx}">
           <span class="s">${e.slot}</span>
           <span class="t">${esc(e.title)}${e.portion !== 1 ? ` <span class="unit">×${e.portion}</span>` : ''}
             ${e.note ? `<div class="unit" style="font-size:11.5px">${esc(e.note)}</div>` : ''}</span>
           <span class="m">${e.recipe ? Math.round((e.recipe.calories_per_serving || 0) * e.portion) + ' kcal' : '—'}</span>
-        </div>`).join('')}
+        </div>
+        ${e.recipe ? `<div class="slotdetail" hidden>${recipeDetail(e.recipe, e.portion)}</div>` : ''}`).join('')}
       </div>`;
   }).join('');
+
+  // Tap a meal to see what is in it and how to make it
+  el('plan-days').querySelectorAll('.slotline.tappable').forEach((row) => {
+    row.addEventListener('click', () => {
+      const detail = row.nextElementSibling;
+      if (!detail?.classList.contains('slotdetail')) return;
+      detail.hidden = !detail.hidden;
+      row.classList.toggle('open', !detail.hidden);
+      TG?.HapticFeedback?.selectionChanged?.();
+    });
+  });
 }
 
 /* --- views ---------------------------------------------------------------- */
@@ -938,12 +1038,7 @@ function drawRecipes(q = '') {
       <div style="margin-top:7px">${(r.tags || []).slice(0, 3).map((t) => `<span class="pill">${esc(t)}</span>`).join('')}</div>
       <div class="detail">
         ${r.description ? `<p style="margin:0 0 8px">${esc(r.description)}</p>` : ''}
-        ${(r.ingredients || []).length ? `<strong>Ingredients</strong><ul>${
-          r.ingredients.map((g) => `<li>${esc([g.quantity, g.unit, g.item].filter(Boolean).join(' '))}</li>`).join('')
-        }</ul>` : ''}
-        ${(r.instructions || []).length ? `<strong style="display:block;margin-top:10px">Method</strong><ol>${
-          r.instructions.map((s) => `<li>${esc(s.instruction || s)}</li>`).join('')
-        }</ol>` : '<p class="empty">No method recorded for this one yet.</p>'}
+        ${recipeDetail(r, 1)}
       </div>
     </div>`).join('') : `<p class="empty">No recipes match “${esc(q)}”.</p>`;
 

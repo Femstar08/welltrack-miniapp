@@ -69,6 +69,64 @@ function marinadesFor(recipe, byTitle) {
   return out;
 }
 
+
+/**
+ * Components of a fresh meal that can still be done in advance.
+ *
+ * Not everything is a tray of chicken. A schnitzel is cooked on the night, but
+ * its marinade can be made, its chicken can sit in it, and its grain can be
+ * cooked on Sunday — which is the difference between a 40-minute weeknight and
+ * a 15-minute one.
+ */
+// Only dry staples are worth cooking ahead — a tin of chickpeas is already cooked
+const GRAINS = /\b(rice|quinoa|dried lentils?|lentils?|oats|pearl barley|couscous)\b/i;
+const ALREADY_DONE = /\b(tinned|canned|drained|cooked|pre-cooked|sauce|cake|bread|waffle)\b/i;
+
+// Fresh produce only. "Garlic powder" and "salt and pepper" are not chopping jobs.
+const CHOPPABLE = /\b(pepper|onion|carrot|celery|spinach|kale|broccoli|tomato|coriander|parsley|garlic cloves?|plantain|mushroom|avocado)\b/i;
+const NOT_PRODUCE = /\b(powder|dried|ground|flakes?|seasoning|salt|puree|sauce|stock|oil|vinegar|paprika|cumin|cayenne|oregano|thyme|cinnamon|nutmeg|allspice|curry)\b/i;
+
+const PROTEIN = /\b(chicken|salmon|turkey|beef|mince|prawn|mackerel|tuna)\b/i;
+
+export function prepTasksFor(recipe, byTitle) {
+  const tasks = [];
+  const ings = recipe.ingredients || [];
+
+  const marinades = marinadesFor(recipe, byTitle);
+  const protein = ings.find((i) => PROTEIN.test(i.item || ""));
+  for (const m of marinades) {
+    tasks.push({
+      kind: "marinade",
+      marinade: m,
+      text: protein
+        ? `Make ${m.title} and leave the ${String(protein.item).split(",")[0].toLowerCase()} in it`
+        : `Make ${m.title}`,
+      minutes: m.prep_time_min || 10,
+    });
+  }
+
+  const grains = ings.filter((i) => GRAINS.test(i.item || "") && !ALREADY_DONE.test(i.item || ""));
+  if (grains.length) {
+    tasks.push({
+      kind: "grain",
+      text: `Cook the ${grains.map((g) => String(g.item).split(",")[0].toLowerCase()).join(" and ")} ahead`,
+      minutes: 20,
+    });
+  }
+
+  const chop = ings.filter((i) => CHOPPABLE.test(i.item || "") && !NOT_PRODUCE.test(i.item || ""));
+  if (chop.length >= 3) {
+    tasks.push({
+      kind: "chop",
+      text: `Chop ${chop.slice(0, 4).map((c) => String(c.item).split(",")[0].toLowerCase()).join(", ")}` +
+            (chop.length > 4 ? ` and ${chop.length - 4} more` : ""),
+      minutes: 10,
+    });
+  }
+
+  return tasks;
+}
+
 /**
  * Build one session's plan.
  *
@@ -155,16 +213,43 @@ export function buildSession(recipes, planRows, cookDate, session) {
     steps.push(`Portion as you go: ${items.map((i) => `${i.title} ×${Math.ceil(i.portions)}`).join(", ")}.`);
   }
 
-  const freshOnTheDay = [...new Set(inWindow
-    .map((row) => (row.recipe_id && byId.get(row.recipe_id)) ||
-                  byTitle.get((row.recipe_title || "").toLowerCase()))
-    .filter((r) => r && !canCookAhead(r))
-    .map((r) => r.title))];
+  // Everything in the window that is not a full cook-ahead batch, with
+  // whatever can still be done in advance for it.
+  const batchedIds = new Set(items.map((i) => i.recipe.id));
+  const freshSeen = new Map();
+  for (const row of inWindow) {
+    const recipe = (row.recipe_id && byId.get(row.recipe_id)) ||
+                   byTitle.get((row.recipe_title || "").toLowerCase());
+    if (!recipe || batchedIds.has(recipe.id)) continue;
+    const prev = freshSeen.get(recipe.id) || {
+      recipe,
+      title: recipe.title,
+      days: new Set(),
+      slots: new Set(),
+      prepMin: recipe.prep_time_min || 0,
+      cookMin: recipe.cook_time_min || 0,
+      tasks: prepTasksFor(recipe, byTitle),
+    };
+    prev.days.add(dayName(row.date));
+    prev.slots.add(row.slot);
+    freshSeen.set(recipe.id, prev);
+  }
+  const fresh = [...freshSeen.values()].map((f) => ({ ...f, days: [...f.days], slots: [...f.slots] }));
+  const prepAhead = fresh.filter((f) => f.tasks.length);
+  const nothingToPrep = fresh.filter((f) => !f.tasks.length);
+  const freshOnTheDay = fresh.map((f) => f.title);
+
+  const prepMinutes = prepAhead.reduce(
+    (a, f) => a + f.tasks.reduce((b, t) => b + (t.minutes || 0), 0), 0);
 
   return {
     session,
     cookDate,
+    fresh,
+    prepAhead,
+    nothingToPrep,
     freshOnTheDay,
+    prepMinutes,
     cookDay: dayName(cookDate),
     coversLabel: session.coversLabel,
     windowDates,
@@ -174,7 +259,7 @@ export function buildSession(recipes, planRows, cookDate, session) {
     elapsed,
     totalPortions: items.reduce((a, i) => a + Math.ceil(i.portions), 0),
     steps,
-    empty: items.length === 0,
+    empty: items.length === 0 && prepAhead.length === 0,
   };
 }
 
