@@ -7,257 +7,128 @@
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <script src="config.js"></script>
 <script src="workouts.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="wt-tokens.css">
+<link rel="stylesheet" href="mini.css">
 <style>
-  :root {
-    --bg: #ffffff;
-    --text: #1c1c1e;
-    --hint: #8e8e93;
-    --link: #2481cc;
-    --button: #2481cc;
-    --button-text: #ffffff;
-    --secondary-bg: #f2f2f7;
-    --border: rgba(120,120,128,0.18);
-    --ok: #2f9e44;
-    --warn: #e8a317;
-    --bad: #e03131;
-    --radius: 14px;
-  }
-  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; padding: 0; }
-  body {
-    background: var(--bg);
-    color: var(--text);
-    font: 15px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
-    padding: 0 16px calc(76px + env(safe-area-inset-bottom));
-    max-width: 680px;
-    margin: 0 auto;
-  }
-  h1 { font-size: 20px; margin: 18px 0 2px; letter-spacing: -0.02em; }
-  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--hint); margin: 22px 0 8px; font-weight: 600; }
-  .sub { color: var(--hint); font-size: 13px; margin: 0 0 14px; }
+/* Only what the design system does not carry: the running app's scroll
+   behaviour, and disclosure widgets the static mockups did not need. */
+html, body { margin: 0; padding: 0; background: var(--surface-base); }
+body { font-family: var(--font-sans); color: var(--ink); -webkit-tap-highlight-color: transparent; }
+.m-screen { width: 100%; max-width: 480px; margin: 0 auto; min-height: 100vh; }
+.m-body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom) + var(--space-6)); }
+.m-tabs { position: fixed; left: 50%; transform: translateX(-50%); bottom: 0;
+          width: 100%; max-width: 480px; padding-bottom: env(safe-area-inset-bottom); z-index: 20; }
+[hidden] { display: none !important; }
+/* each view stacks on the same rhythm as the mockups */
+main.m-body > section { display: flex; flex-direction: column; gap: var(--space-4); }
+main.m-body > section > .m-sub { margin-top: calc(var(--space-4) * -1 + 2px); }
+.m-sect { margin: var(--space-2) 0 calc(var(--space-2) * -1); }
 
-  .card {
-    background: var(--secondary-bg);
-    border-radius: var(--radius);
-    padding: 14px;
-    margin-bottom: 10px;
-  }
-  .row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-  .big { font-size: 26px; font-weight: 650; letter-spacing: -0.02em; }
-  .unit { color: var(--hint); font-size: 13px; font-weight: 400; }
-
-  .bar { height: 8px; background: var(--border); border-radius: 99px; overflow: hidden; margin-top: 9px; }
-  .bar > i { display: block; height: 100%; border-radius: 99px; background: var(--button); transition: width .45s cubic-bezier(.2,.7,.3,1); }
-  .bar.over > i { background: var(--warn); }
-
-  .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
-  .tile { background: var(--secondary-bg); border-radius: var(--radius); padding: 12px 13px; }
-  .tile .k { color: var(--hint); font-size: 12px; margin-bottom: 3px; }
-  .tile .v { font-size: 20px; font-weight: 640; letter-spacing: -0.02em; }
-
-  .pill { display: inline-block; font-size: 11px; padding: 2px 8px; border-radius: 99px; background: var(--border); color: var(--text); margin-right: 5px; }
-  .status { font-size: 12px; font-weight: 600; }
-  .status.ok { color: var(--ok); } .status.warn { color: var(--warn); }
-  .status.bad { color: var(--bad); } .status.none { color: var(--hint); }
-
-  input[type=search] {
-    width: 100%; padding: 11px 13px; font-size: 15px; color: var(--text);
-    background: var(--secondary-bg); border: 0; border-radius: 11px; margin-bottom: 10px;
-    font-family: inherit;
-  }
-  input[type=search]::placeholder { color: var(--hint); }
-
-  .recipe { cursor: pointer; }
-  .recipe .row { align-items: center; }
-  .recipe h3 { margin: 0; font-size: 15px; font-weight: 600; }
-  .macros { color: var(--hint); font-size: 12.5px; margin-top: 3px; }
-  .detail { display: none; margin-top: 12px; border-top: 1px solid var(--border); padding-top: 12px; }
-  .recipe.open .detail { display: block; }
-  .detail ul, .detail ol { margin: 6px 0 0; padding-left: 20px; }
-  .detail li { margin-bottom: 4px; }
-
-  label.check { display: flex; align-items: center; gap: 10px; padding: 9px 2px; border-bottom: 1px solid var(--border); }
-  label.check:last-child { border-bottom: 0; }
-  label.check input { width: 19px; height: 19px; accent-color: var(--button); }
-  label.check.done span { text-decoration: line-through; color: var(--hint); }
-  label.check em.qty { font-style: normal; color: var(--hint); }
-  label.check em.for { display: block; font-style: normal; font-size: 11.5px; color: var(--hint); }
-
-  .acts { display: flex; gap: 6px; margin-top: 11px; }
-  .acts button {
-    flex: 1; border: 0; border-radius: 9px; padding: 8px 4px; cursor: pointer;
-    background: var(--bg); color: var(--text); font: 600 12.5px/1 inherit;
-    box-shadow: inset 0 0 0 1px var(--border);
-  }
-  .acts button[aria-pressed="true"] { background: var(--ok); color: #fff; box-shadow: none; }
-  .acts button.rate[aria-pressed="true"] { background: var(--button); color: var(--button-text); }
-  .acts button:disabled { opacity: .5; }
-
-  .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.45);
-           display: flex; align-items: flex-end; z-index: 40; }
-  .sheet[hidden] { display: none; }
-  .sheet > div { background: var(--bg); width: 100%; max-height: 78vh; overflow-y: auto;
-                 border-radius: 16px 16px 0 0; padding: 16px 16px calc(20px + env(safe-area-inset-bottom)); }
-  .sheet h3 { margin: 0 0 4px; font-size: 16px; }
-  .sheet .opt { width: 100%; text-align: left; border: 0; background: var(--secondary-bg);
-                border-radius: 11px; padding: 11px 13px; margin-top: 8px; cursor: pointer;
-                color: var(--text); font: inherit; }
-  .sheet .opt .m { color: var(--hint); font-size: 12.5px; margin-top: 2px; }
-  .toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 86px;
-           background: var(--text); color: var(--bg); padding: 9px 15px; border-radius: 99px;
-           font-size: 13px; z-index: 50; opacity: 0; transition: opacity .2s; pointer-events: none; }
-  .toast.show { opacity: 1; }
-  .seg { display: flex; gap: 6px; margin-bottom: 12px; }
-  .seg button {
-    flex: 1; border: 0; border-radius: 9px; padding: 8px 4px; cursor: pointer;
-    background: var(--secondary-bg); color: var(--hint);
-    font: 600 12.5px/1 inherit;
-  }
-  .seg button[aria-pressed="true"] { background: var(--button); color: var(--button-text); }
-  .slotline.tappable { cursor: pointer; }
-  .slotline.empty { cursor: pointer; color: var(--hint); }
-  .slotline.empty em { font-style: normal; }
-  .acts.planacts { margin: 0 0 12px; }
-  .acts.planacts button { font-size: 12px; padding: 7px 4px; }
-  .slotline.tappable .t::after { content: ' ›'; color: var(--hint); }
-  .slotline.open .t::after { content: ' ⌄'; }
-  .slotdetail { padding: 4px 0 12px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
-  .slotdetail ul, .slotdetail ol { margin: 6px 0 0; padding-left: 20px; }
-  .slotdetail li { margin-bottom: 4px; }
-  details.sub-recipe { margin-top: 12px; padding: 10px 12px; border-radius: 10px;
-                       background: var(--bg); box-shadow: inset 0 0 0 1px var(--border); }
-  details.sub-recipe summary { cursor: pointer; font-weight: 600; font-size: 13px; }
-  details.sub-recipe.stocked summary { color: var(--ok); }
-  details.sub-recipe.todo summary { color: var(--warn); }
-  .jarbtn { margin-top: 10px; border: 0; border-radius: 9px; padding: 9px 14px; cursor: pointer;
-            background: var(--button); color: var(--button-text); font: 600 13px/1 inherit; }
-  .prepflag { font-size: 11px; margin-left: 5px; }
-  .prepbox { background: var(--bg); box-shadow: inset 0 0 0 1px var(--border);
-             border-radius: 10px; padding: 9px 12px; margin-bottom: 10px; font-size: 13px; }
-  .prepbox ul { margin: 5px 0 0; padding-left: 18px; }
-  .batch .row + .row { margin-top: 2px; }
-  .batch ol { margin: 10px 0 0; padding-left: 20px; font-size: 13.5px; }
-  .batch ol li { margin-bottom: 5px; }
-  .batch .item { padding: 8px 0; border-top: 1px solid var(--border); }
-  .batch .item:first-of-type { border-top: 0; }
-  .batch .item .m { color: var(--hint); font-size: 12.5px; margin-top: 2px; }
-  .batch .fresh { margin-top: 11px; padding-top: 10px; border-top: 1px solid var(--border);
-                  color: var(--hint); font-size: 12.5px; }
-  .dayhead { display: flex; align-items: baseline; justify-content: space-between;
-             margin: 18px 0 7px; gap: 8px; }
-  .dayhead strong { font-size: 14px; }
-  .dayhead .totals { font-size: 12px; color: var(--hint); white-space: nowrap; }
-  .dayhead .totals.short { color: var(--warn); }
-  .slotline { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0;
-              border-bottom: 1px solid var(--border); font-size: 13.5px; }
-  .slotline:last-child { border-bottom: 0; }
-  .slotline .s { color: var(--hint); width: 74px; flex: none; font-size: 12px; padding-top: 1px; }
-  .slotline .t { flex: 1; }
-  .slotline .m { color: var(--hint); font-size: 12px; white-space: nowrap; }
-  table.ex { width: 100%; border-collapse: collapse; margin-top: 11px; font-size: 13.5px; }
-  table.ex th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
-                color: var(--hint); font-weight: 600; padding: 0 0 5px; }
-  table.ex th.num, table.ex td.num { text-align: right; white-space: nowrap; padding-left: 8px; }
-  table.ex td { padding: 5px 0; border-top: 1px solid var(--border); vertical-align: top; }
-  table.ex tr.note td { border-top: 0; padding: 0 0 5px; color: var(--hint); font-size: 12px; }
-  .circuit { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); }
-  .deload { margin-top: 9px; padding: 8px 10px; border-radius: 9px; font-size: 12.5px;
-            background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--text); }
-  details.rules { margin-top: 12px; font-size: 12.5px; color: var(--hint); }
-  details.rules summary { cursor: pointer; }
-  details.rules ul { margin: 6px 0 0; padding-left: 18px; }
-  svg.spark { width: 100%; height: 56px; display: block; margin-top: 8px; overflow: visible; }
-
-  nav {
-    position: fixed; left: 0; right: 0; bottom: 0;
-    display: flex; background: var(--bg);
-    border-top: 1px solid var(--border);
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-  nav button {
-    flex: 1; border: 0; background: none; color: var(--hint);
-    font: 500 10.5px/1.1 inherit; padding: 9px 2px 10px; cursor: pointer;
-  }
-  nav button em { display: block; font-size: 19px; font-style: normal; margin-bottom: 3px; }
-  nav button[aria-current="true"] { color: var(--link); }
-
-  .empty { color: var(--hint); font-size: 13.5px; padding: 10px 0; }
-  .err { color: var(--bad); font-size: 13px; background: var(--secondary-bg); padding: 11px 13px; border-radius: 11px; }
-  [hidden] { display: none !important; }
+details.m-nest-d { margin-top: var(--space-2) }
+details.m-nest-d > summary { cursor: pointer; color: var(--accent); min-height: 32px;
+  display: flex; align-items: center }
+.m-detail { padding: var(--space-3) var(--space-4) var(--space-4);
+  border-top: 1px solid var(--border-subtle); background: var(--surface-card) }
+.m-detail ul, .m-detail ol { margin: var(--space-2) 0 0; padding-left: 20px }
+.m-detail li { margin-bottom: var(--space-1); color: var(--ink) }
+.m-toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(var(--tabbar-h) + 20px);
+  background: var(--ink); color: var(--surface-base); padding: 10px 16px;
+  border-radius: var(--radius-pill); z-index: 60; opacity: 0; transition: opacity .18s;
+  pointer-events: none; max-width: 85% }
+.m-toast.show { opacity: 1 }
+.m-sheet-wrap { position: fixed; inset: 0; z-index: 50; display: flex; align-items: flex-end }
+.m-sheet-wrap .m-sheet { position: relative; max-height: 78vh; overflow-y: auto;
+  width: 100%; max-width: 480px; margin: 0 auto }
+.m-sheet-wrap .m-scrim { position: fixed }
 </style>
 </head>
 <body>
 
-<main>
+<div class="m-screen">
+<main class="m-body">
   <section id="view-today">
-    <h1>Today</h1>
-    <p class="sub" id="today-sub">—</p>
-    <div id="today-macros"></div>
-    <h2>Today's meals</h2>
-    <div id="today-plan"></div>
-    <h2>Session</h2>
+    <div class="m-head"><h1 class="display-md">Today</h1></div>
+    <p class="m-sub caption" id="today-sub">—</p>
+    <div id="today-macros" class="m-col"></div>
+    <h2 class="m-sect label m-up">Today's meals</h2>
+    <div id="today-plan" class="m-col"></div>
+    <h2 class="m-sect label m-up">Session</h2>
     <div id="today-session"></div>
-    <h2>Streaks</h2>
-    <div class="grid" id="today-streaks"></div>
+    <h2 class="m-sect label m-up">Streaks</h2>
+    <div class="m-stats" id="today-streaks"></div>
   </section>
 
   <section id="view-plan" hidden>
-    <h1>Meal plan</h1>
-    <p class="sub" id="plan-sub">What's coming up</p>
-    <div class="seg" id="plan-range">
-      <button data-days="7" aria-pressed="true">This week</button>
-      <button data-days="14">Two weeks</button>
+    <div class="m-head"><h1 class="display-md">Meal plan</h1></div>
+    <p class="m-sub caption" id="plan-sub">What's coming up</p>
+    <div class="m-seg" id="plan-range" role="tablist">
+      <button class="caption-strong" role="tab" data-days="7" aria-selected="true">This week</button>
+      <button class="caption-strong" role="tab" data-days="14" aria-selected="false">Two weeks</button>
     </div>
-    <h2>Batch cook</h2>
-    <div id="batch-sessions"></div>
-    <h2>The days</h2>
-    <div id="plan-days"></div>
+    <h2 class="m-sect label m-up">Batch cook</h2>
+    <div id="batch-sessions" class="m-col"></div>
+    <h2 class="m-sect label m-up">The days</h2>
+    <div id="plan-days" class="m-col"></div>
   </section>
 
   <section id="view-progress" hidden>
-    <h1>Progress</h1>
-    <h2>Last 7 days</h2>
+    <div class="m-head"><h1 class="display-md">Progress</h1></div>
+    <h2 class="m-sect label m-up">Last 7 days</h2>
     <div id="scorecard"></div>
-    <h2>Against the glide path</h2>
-    <p class="sub" id="progress-sub">—</p>
-    <div id="progress-list"></div>
+    <h2 class="m-sect label m-up">Against the glide path</h2>
+    <p class="m-sub caption" id="progress-sub">—</p>
+    <div id="progress-list" class="m-col"></div>
   </section>
 
   <section id="view-recipes" hidden>
-    <h1>Recipes</h1>
-    <input type="search" id="recipe-search" placeholder="Search name, cuisine or tag" autocomplete="off" />
-    <div id="recipe-list"></div>
+    <div class="m-head"><h1 class="display-md">Recipes</h1></div>
+    <label class="m-search">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+      <input type="search" id="recipe-search" placeholder="Name, cuisine or tag" autocomplete="off" aria-label="Search recipes" />
+    </label>
+    <div id="recipe-list" class="m-col"></div>
   </section>
 
   <section id="view-shopping" hidden>
-    <h1>Ingredients</h1>
-    <p class="sub" id="shopping-sub">For today's meals</p>
-    <div class="seg" id="shop-range">
-      <button data-days="1" aria-pressed="true">Today</button>
-      <button data-days="3">3 days</button>
-      <button data-days="7">Week</button>
-      <button data-days="14">Fortnight</button>
+    <div class="m-head"><h1 class="display-md">Ingredients</h1></div>
+    <p class="m-sub caption" id="shopping-sub">For today's meals</p>
+    <div class="m-seg" id="shop-range" role="tablist">
+      <button class="caption-strong" role="tab" data-days="1" aria-selected="true">Today</button>
+      <button class="caption-strong" role="tab" data-days="3" aria-selected="false">3 days</button>
+      <button class="caption-strong" role="tab" data-days="7" aria-selected="false">Week</button>
+      <button class="caption-strong" role="tab" data-days="14" aria-selected="false">Fortnight</button>
     </div>
-    <div id="shopping-list"></div>
+    <div id="shopping-list" class="m-col"></div>
   </section>
-
-
 </main>
 
-<div class="sheet" id="swap-sheet" hidden><div>
-  <h3 id="swap-title">Swap meal</h3>
-  <p class="sub" id="swap-sub">Pick a replacement</p>
-  <div id="swap-options"></div>
-</div></div>
-<div class="toast" id="toast"></div>
+<div class="m-sheet-wrap" id="swap-sheet" hidden>
+  <div class="m-scrim" data-close></div>
+  <div class="m-sheet">
+    <i class="m-sheet__grab"></i>
+    <h3 class="title-md" id="swap-title">Swap meal</h3>
+    <p class="m-sub caption" id="swap-sub">Pick a replacement</p>
+    <div id="swap-options" class="m-col"></div>
+  </div>
+</div>
+<div class="m-toast caption" id="toast"></div>
 
-<nav>
-  <button data-view="today" aria-current="true"><em>📊</em>Today</button>
-  <button data-view="plan"><em>🗓️</em>Plan</button>
-  <button data-view="progress"><em>📈</em>Progress</button>
-  <button data-view="recipes"><em>🍳</em>Recipes</button>
-  <button data-view="shopping"><em>🛒</em>Ingredients</button>
+<nav class="m-tabs" role="tablist" aria-label="Sections">
+  <button class="m-tab" role="tab" data-view="today" aria-selected="true">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M4 19V10M10 19V5M16 19v-6M22 19H2"/></svg><span>Today</span></button>
+  <button class="m-tab" role="tab" data-view="plan" aria-selected="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg><span>Plan</span></button>
+  <button class="m-tab" role="tab" data-view="progress" aria-selected="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 17l6-6 4 4 7-8"/><path d="M21 7h-5M21 7v5"/></svg><span>Progress</span></button>
+  <button class="m-tab" role="tab" data-view="recipes" aria-selected="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 3v8a3 3 0 006 0V3M9 11v10M15 3c-1.7 1.2-2 3.4-2 5.5 0 1.6.6 2.5 2 2.5v10"/></svg><span>Recipes</span></button>
+  <button class="m-tab" role="tab" data-view="shopping" aria-selected="false">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M3 4h2l2.4 11.2a2 2 0 002 1.6h7.7a2 2 0 002-1.6L21 8H6"/><circle cx="10" cy="20" r="1"/><circle cx="18" cy="20" r="1"/></svg><span>Ingredients</span></button>
 </nav>
+</div>
 
 <script>
 /* ---------------------------------------------------------------------------
@@ -330,15 +201,21 @@ async function tryRows(path) {
 const el = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 
-function macroCard(label, value, target, unit) {
+/** A target bar. Protein leads — it is the binding constraint in the plan. */
+function macroCard(label, value, target, unit, minor = false) {
   const pct = target ? Math.min(100, Math.round((value / target) * 100)) : 0;
-  const over = target && value > target;
-  return `<div class="card">
-    <div class="row">
-      <strong>${label}</strong>
-      <span class="big">${Math.round(value)}<span class="unit"> / ${target}${unit}</span></span>
+  const short = target && value < target * 0.9;
+  const fill = short ? 'var(--warn-fill)' : 'var(--success-fill)';
+  return `<div class="m-target${minor ? ' m-target--minor' : ''}">
+    <div class="m-target__head">
+      <span class="${minor ? 'title-sm' : 'title-md'}">${label}</span>
+      <span class="m-grow"></span>
+      <span class="${minor ? 'metric-sm' : 'metric'}">${Math.round(value)}</span>
+      <span class="unit m-muted">/ ${target}${unit}</span>
     </div>
-    <div class="bar${over ? ' over' : ''}"><i style="width:${pct}%"></i></div>
+    <div class="m-track${minor ? ' m-track--thin' : ''}">
+      <span style="width:${pct}%;background:${fill}"></span>
+    </div>
   </div>`;
 }
 
@@ -372,32 +249,50 @@ function workoutBlock(week) {
   const idx = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/London' })).getDay();
   const w = (window.WELLTRACK_WORKOUTS || {})[idx];
   const rules = window.WELLTRACK_TRAINING_RULES || [];
-  if (!w) return `<div class="card"><strong>${dayInfo().session}</strong></div>`;
+  if (!w) return `<div class="m-meal"><strong class="title-md">${esc(dayInfo().session)}</strong></div>`;
 
   const deload = week && week % 4 === 0;
   const row = (e) => `<tr>
-      <td>${esc(e.name)}</td>
-      <td class="num">${esc(e.sets || e.detail || '')}</td>
-      <td class="num">${esc(e.tempo || '')}</td>
-      <td class="num">${esc(e.rest || '')}</td>
-    </tr>${e.note ? `<tr class="note"><td colspan="4">${esc(e.note)}</td></tr>` : ''}`;
+      <td class="body">${esc(e.name)}${e.note ? `<span class="m-ex__note caption">${esc(e.note)}</span>` : ''}</td>
+      <td class="caption-strong" style="white-space:nowrap">${esc(e.sets || e.detail || '')}</td>
+      <td class="caption m-muted" style="white-space:nowrap">${esc(e.tempo || '')}</td>
+      <td class="caption m-muted" style="white-space:nowrap">${esc(e.rest || '')}</td>
+    </tr>`;
 
-  return `<div class="card">
-    <div class="row">
-      <strong>${esc(w.name)}</strong>
-      <span class="unit">${esc(w.duration)} · ${esc(w.intensity)}</span>
+  return `<div class="m-meal">
+    <div class="m-meal__top">
+      <div class="m-grow">
+        <h3 class="m-meal__name title-md" style="margin:0">${esc(w.name)}</h3>
+        <p class="caption m-muted" style="margin:2px 0 0">${esc(w.focus)}</p>
+      </div>
+      <span class="caption m-muted" style="white-space:nowrap">${esc(w.duration)} · ${esc(w.intensity)}</span>
     </div>
-    <div class="macros">${esc(w.focus)}</div>
-    ${deload ? `<div class="deload">Deload week — all weights down 40%, one less set per exercise. Mandatory, not optional.</div>` : ''}
-    ${w.note ? `<p class="sub" style="margin:9px 0 0">${esc(w.note)}</p>` : ''}
-    ${w.exercises?.length ? `<table class="ex">
-      <thead><tr><th>Exercise</th><th class="num">Sets×Reps</th><th class="num">Tempo</th><th class="num">Rest</th></tr></thead>
+
+    ${deload ? `<div class="m-deload caption-strong">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true" style="flex:none"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+      <span>Deload week — all weights down 40%, one less set per exercise. Mandatory.</span>
+    </div>` : ''}
+
+    ${w.note ? `<p class="caption m-muted" style="margin:0">${esc(w.note)}</p>` : ''}
+
+    ${w.exercises?.length ? `<table class="m-ex">
+      <thead><tr>
+        <th class="label m-up">Exercise</th><th class="label m-up">Sets</th>
+        <th class="label m-up">Tempo</th><th class="label m-up">Rest</th>
+      </tr></thead>
       <tbody>${w.exercises.map(row).join('')}</tbody></table>` : ''}
-    ${w.circuit ? `<div class="circuit"><strong>${esc(w.circuit.title)}</strong>
-      <p class="sub" style="margin:3px 0 6px">${esc(w.circuit.note)}</p>
-      <table class="ex"><tbody>${w.circuit.items.map(row).join('')}</tbody></table></div>` : ''}
-    ${w.exercises?.length ? `<details class="rules"><summary>Training rules</summary><ul>${
-      rules.map((r) => `<li>${esc(r)}</li>`).join('')}</ul></details>` : ''}
+
+    ${w.circuit ? `<div class="m-circuit">
+      <strong class="title-sm">${esc(w.circuit.title)}</strong>
+      <p class="caption m-muted" style="margin:0">${esc(w.circuit.note)}</p>
+      <table class="m-ex"><tbody>${w.circuit.items.map(row).join('')}</tbody></table>
+    </div>` : ''}
+
+    ${w.exercises?.length ? `<details class="m-nest-d">
+      <summary class="caption-strong">Training rules</summary>
+      <ul class="caption m-muted" style="margin:var(--space-2) 0 0;padding-left:18px">${
+        rules.map((r) => `<li>${esc(r)}</li>`).join('')}</ul>
+    </details>` : ''}
   </div>`;
 }
 
@@ -504,28 +399,55 @@ async function todaysPlan() {
   });
 }
 
-function planCard({ slot, recipe, source, note, eaten, verdict }) {
+function planCard({ slot, recipe, source, note, eaten, verdict, portion }) {
   if (!recipe) {
-    return `<div class="card"><div class="row"><strong>${slot.label}</strong>
-      <span class="unit">nothing suitable yet</span></div></div>`;
+    return `<div class="m-meal">
+      <div class="m-meal__top">
+        <span class="m-meal__slot label m-up">${slot.label}</span>
+        <span class="m-grow"></span>
+        <span class="caption m-faint">nothing suitable yet</span>
+      </div>
+    </div>`;
   }
-  return `<div class="card recipe" data-id="${recipe.id}">
-    <div class="row">
-      <div><div class="k" style="color:var(--hint);font-size:12px">${slot.label}${
-        source === 'suggested' ? ' · suggested' : ' · from Coach'}</div>
-        <h3>${esc(recipe.title)}${recipe.portion && recipe.portion !== 1 ? ` <span class="unit">×${recipe.portion}</span>` : ''}</h3></div>
-      <span class="unit">${recipe.calories_per_serving ?? '—'} kcal</span>
+  const p = portion || recipe.portion || 1;
+  const kcal = recipe.calories_per_serving != null
+    ? Math.round(recipe.calories_per_serving * p) : null;
+
+  return `<div class="m-meal${eaten ? ' m-meal--eaten' : ''} recipe" data-id="${recipe.id || ''}">
+    <div class="m-meal__top">
+      <div class="m-grow">
+        <div class="m-row">
+          <span class="m-meal__slot label m-up">${slot.label}</span>
+          <span class="m-src ${source === 'coach' ? 'm-src--coach' : ''} label">${
+            source === 'suggested' ? 'Suggested' : 'Coach'}</span>
+        </div>
+        <h3 class="m-meal__name title-md">${esc(recipe.title)}${
+          p !== 1 ? ` <span class="unit m-muted">×${p}</span>` : ''}</h3>
+      </div>
+      <div class="m-meal__kcal metric-sm">${kcal ?? '—'}<span class="unit m-muted"> kcal</span></div>
     </div>
-    <div class="macros">${recipe.protein_per_serving != null
-      ? `${recipe.protein_per_serving}g protein · ${recipe.carbs_per_serving}g carbs · ${recipe.fat_per_serving}g fat`
-      : 'macros not recorded for this one'}${note ? ` · ${esc(note)}` : ''}</div>
-    <div class="acts" data-slot="${slot.key}" data-recipe="${recipe.id || ''}">
-      <button class="ate" aria-pressed="${eaten ? 'true' : 'false'}">${eaten ? '✓ Eaten' : 'Ate it'}</button>
-      <button class="swap">⇄ Swap</button>
-      <button class="rate like" aria-pressed="${verdict === 'like'}">👍</button>
-      <button class="rate dislike" aria-pressed="${verdict === 'dislike'}">👎</button>
+
+    <p class="m-meal__macros caption" style="margin:0">${
+      recipe.protein_per_serving != null
+        ? `${Math.round(recipe.protein_per_serving * p)}g protein · ${
+            Math.round((recipe.carbs_per_serving || 0) * p)}g carbs · ${
+            Math.round((recipe.fat_per_serving || 0) * p)}g fat`
+        : 'macros not recorded'}</p>
+    ${note ? `<p class="m-meal__note caption" style="margin:0">${esc(note)}</p>` : ''}
+
+    <div class="m-acts" data-slot="${slot.key}" data-recipe="${recipe.id || ''}">
+      <button class="m-act ate caption-strong${eaten ? ' m-act--done' : ''}" aria-pressed="${eaten ? 'true' : 'false'}">${eaten ? 'Eaten' : 'Ate it'}</button>
+      <button class="m-act swap caption-strong">Swap</button>
+      <button class="m-act rate like${verdict === 'like' ? ' m-act--picked' : ''}" aria-pressed="${verdict === 'like'}" aria-label="Like this meal">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M7 11v9H4a1 1 0 01-1-1v-7a1 1 0 011-1h3zm0 0l4-8a2 2 0 013 1.8V9h4.6a2 2 0 011.9 2.6l-2 7A2 2 0 0116.6 20H7"/></svg></button>
+      <button class="m-act rate dislike${verdict === 'dislike' ? ' m-act--picked' : ''}" aria-pressed="${verdict === 'dislike'}" aria-label="Dislike this meal">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M17 13V4h3a1 1 0 011 1v7a1 1 0 01-1 1h-3zm0 0l-4 8a2 2 0 01-3-1.8V15H5.4a2 2 0 01-1.9-2.6l2-7A2 2 0 017.4 4H17"/></svg></button>
     </div>
-    <div class="detail">${recipeDetail(recipe, recipe.portion || 1)}</div>
+
+    <details class="m-nest-d">
+      <summary class="caption-strong">Ingredients and method</summary>
+      <div class="m-detail" style="border-radius:var(--radius-md);margin-top:var(--space-2);border-top:0">${recipeDetail(recipe, p)}</div>
+    </details>
   </div>`;
 }
 
@@ -560,7 +482,7 @@ function ingredientList(recipe, portion = 1) {
 
 function methodList(recipe) {
   if (!(recipe.instructions || []).length) {
-    return '<p class="empty">No method recorded for this one.</p>';
+    return '<p class="caption m-muted">No method recorded for this one.</p>';
   }
   return `<strong style="display:block;margin-top:10px">Method</strong><ol>${
     recipe.instructions.map((x) => `<li>${esc(x.instruction || x)}</li>`).join('')}</ol>`;
@@ -581,7 +503,7 @@ function recipeDetail(recipe, portion = 1) {
         <summary>${esc(m.title)} — how to make it</summary>
         ${ingredientList(m, 1)}
         ${methodList(m)}
-        <p class="sub" style="margin:8px 0 0">Makes ${m.servings} tbsp. Keeps in a jar in the fridge,
+        <p class="caption m-muted" style="margin:8px 0 0">Makes ${m.servings} tbsp. Keeps in a jar in the fridge,
           so make it once and use it across the week.</p>
       </details>`).join('')}`;
 }
@@ -651,14 +573,17 @@ function openSwap(slot, currentIds, onPick) {
   const sheet = el('swap-sheet');
   el('swap-title').textContent = `Swap ${slot.label.toLowerCase()}`;
   el('swap-sub').textContent = 'Liked recipes first, disliked last';
-  el('swap-options').innerHTML = '<p class="empty">Loading…</p>';
+  el('swap-options').innerHTML = '<p class="caption m-muted">Loading…</p>';
   sheet.hidden = false;
 
   swapOptions(slot.key, currentIds).then((opts) => {
-    el('swap-options').innerHTML = opts.slice(0, 25).map((r) => `
-      <button class="opt" data-id="${r.id}">
-        <div>${esc(r.title)}</div>
-        <div class="m">${r.calories_per_serving} kcal · ${r.protein_per_serving}g protein</div>
+    el('swap-options').innerHTML = opts.slice(0, 25).map((r, i) => `
+      <button class="m-swap${i === 0 ? ' m-swap--best' : ''}" data-id="${r.id}">
+        <span class="m-grow">
+          <span class="body-strong" style="display:block">${esc(r.title)}</span>
+          <span class="caption m-muted">${r.protein_per_serving}g protein</span>
+        </span>
+        <span class="m-delta caption-strong">${r.calories_per_serving} kcal</span>
       </button>`).join('');
     el('swap-options').querySelectorAll('.opt').forEach((b) =>
       b.addEventListener('click', () => { sheet.hidden = true; onPick(b.dataset.id); }));
@@ -666,7 +591,7 @@ function openSwap(slot, currentIds, onPick) {
 }
 
 el('swap-sheet').addEventListener('click', (e) => {
-  if (e.target.id === 'swap-sheet') el('swap-sheet').hidden = true;
+  if (e.target.dataset.close !== undefined) el('swap-sheet').hidden = true;
 });
 
 
@@ -674,7 +599,7 @@ el('swap-sheet').addEventListener('click', (e) => {
 function wireMealActions(plan) {
   const currentIds = plan.filter((p) => p.recipe?.id).map((p) => p.recipe.id);
 
-  el('today-plan').querySelectorAll('.acts').forEach((bar) => {
+  el('today-plan').querySelectorAll('.m-acts').forEach((bar) => {
     const slotKey = bar.dataset.slot;
     const recipeId = bar.dataset.recipe;
     const entry = plan.find((p) => p.slot.key === slotKey);
@@ -802,13 +727,13 @@ function dayLabel(iso) {
 
 async function renderBatch() {
   const host = el('batch-sessions');
-  host.innerHTML = '<p class="empty">Working out the cook sessions…</p>';
+  host.innerHTML = '<p class="caption m-muted">Working out the cook sessions…</p>';
 
   let upcomingSessions;
   try {
     ({ upcomingSessions } = await import('./batchplan.js'));
   } catch {
-    host.innerHTML = '<p class="empty">Batch planning unavailable.</p>';
+    host.innerHTML = '<p class="caption m-muted">Batch planning unavailable.</p>';
     return;
   }
 
@@ -823,22 +748,22 @@ async function renderBatch() {
 
   host.innerHTML = sessions.map((s) => {
     if (s.empty) {
-      return `<div class="card batch">
+      return `<div class="m-batch batch">
         <div class="row"><strong>${esc(s.session.label)}</strong>
           <span class="unit">${dayLabel(s.cookDate)}</span></div>
-        <p class="empty" style="padding:6px 0 0">Nothing to cook ahead for ${esc(s.coversLabel.toLowerCase())}
+        <p class="caption m-muted" style="padding:6px 0 0">Nothing to cook ahead for ${esc(s.coversLabel.toLowerCase())}
           — plan those days first, or everything in them is made fresh.</p>
       </div>`;
     }
-    return `<div class="card batch">
-      <div class="row">
-        <strong>${esc(s.session.label)}</strong>
-        <span class="unit">${dayLabel(s.cookDate)} · covers ${esc(s.coversLabel.toLowerCase())}</span>
+    return `<div class="m-batch batch">
+      <div class="m-row">
+        <strong class="title-md m-grow">${esc(s.session.label)}</strong>
+        <span class="caption m-muted" style="text-align:right">${dayLabel(s.cookDate)}<br>covers ${esc(s.coversLabel.toLowerCase())}</span>
       </div>
-      <div class="macros">Hands-on ~${s.handsOn} min · in the kitchen ~${s.elapsed} min · ${s.totalPortions} portions</div>
+      <div class="m-batch__meta caption"><span>Hands-on ~${s.handsOn} min</span><span>In the kitchen ~${s.elapsed} min</span><span>${s.totalPortions} portions</span></div>
 
-      ${s.marinadeJobs?.length ? `<div class="item"><strong>Jars</strong>
-        <div class="m">Marinades keep for a week or two, so these are only made when stock runs out</div>
+      ${s.marinadeJobs?.length ? `<div class="m-jar" style="display:block"><strong class="title-sm">Jars</strong>
+        <div class="caption m-muted">Marinades keep a week or two — only made when stock runs out</div>
         ${s.marinadeJobs.map((j) => `<details class="sub-recipe${j.makeJar ? ' todo' : ' stocked'}"
             data-marinade="${j.marinade.id}" data-days="${j.keepsDays}">
           <summary>${j.makeJar ? '🫙 Make' : '✓ In the fridge'} — ${esc(j.marinade.title)}
@@ -847,22 +772,22 @@ async function renderBatch() {
               : `${j.stock.remaining} left, use by ${j.stock.expiresOn}`}</span></summary>
           <div class="m" style="margin-bottom:6px">For ${esc(j.usedBy.join(', '))} · this window needs about ${j.needed}</div>
           ${ingredientList(j.marinade, Math.max(1, j.jarsToMake || 1))}${methodList(j.marinade)}
-          ${j.makeJar ? `<button class="jarbtn" data-id="${j.marinade.id}" data-days="${j.keepsDays}">Made a jar</button>` : ''}
+          ${j.makeJar ? `<button class="m-btn caption-strong jarbtn" data-id="${j.marinade.id}" data-days="${j.keepsDays}">Made a jar</button>` : ''}
         </details>`).join('')}
       </div>` : ''}
 
-      ${s.items.map((it) => `<div class="item">
-        <strong>${esc(it.title)}</strong>${it.batches > 1 ? ` <span class="unit">×${it.batches} batches</span>` : ''}
-        <div class="m">${Math.ceil(it.portions)} portions for ${esc(it.days.join(', '))} ·
+      ${s.items.map((it) => `<div class="m-jar" style="display:block">
+        <strong class="title-sm">${esc(it.title)}</strong>${it.batches > 1 ? ` <span class="unit">×${it.batches} batches</span>` : ''}
+        <div class="caption m-muted">${Math.ceil(it.portions)} portions for ${esc(it.days.join(', '))} ·
           ${it.prepMin} min prep · ${it.cookMin} min cook</div>
         ${it.storage ? `<div class="m">${esc(it.storage)}</div>` : ''}
         <details class="sub-recipe"><summary>Recipe${it.batches > 1 ? ` — quantities ×${it.batches}` : ''}</summary>
           ${recipeDetail(it.recipe, it.batches)}</details>
       </div>`).join('')}
 
-      ${s.items.length ? `<ol>${s.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}
+      ${s.items.length ? `<ol class="m-steps body">${s.steps.map((x) => `<li>${esc(x)}</li>`).join('')}</ol>` : ''}
 
-      ${s.prepAhead?.length ? `<div class="fresh" style="color:var(--text)">
+      ${s.prepAhead?.length ? `<div class="m-jar" style="display:block">
         <strong>Prep ahead for the fresh meals</strong>
         <span class="unit"> · ~${s.prepMinutes} min</span>
         ${s.prepAhead.map((f) => `<div class="item">
@@ -951,7 +876,7 @@ async function renderPlan() {
 
   if (!days.length) {
     el('plan-days').innerHTML =
-      `<p class="empty">Nothing planned yet. Ask Coach for the week's meal plan in Telegram —
+      `<p class="caption m-muted">Nothing planned yet. Ask Coach for the week's meal plan in Telegram —
        whatever it sends you is saved here automatically.</p>`;
     el('plan-sub').textContent = 'No plan saved';
     return;
@@ -963,33 +888,36 @@ async function renderPlan() {
 
   el('plan-days').innerHTML = days.map((d) => {
     const short = d.protein < d.meta.protein - 10;
-    return `<div class="dayhead">
-        <strong>${dayLabel(d.date)} · <span class="unit">${d.meta.type}</span></strong>
-        <span class="totals${short ? ' short' : ''}">${d.kcal}/${d.meta.kcal} kcal · ${d.protein}/${d.meta.protein}g P</span>
+    return `<div class="m-day">
+      <div class="m-day__head">
+        <strong class="title-sm">${dayLabel(d.date)}</strong>
+        <span class="caption m-muted">${d.meta.type}</span>
+        <span class="m-day__totals caption${short ? ' m-short' : ' m-muted'}">${d.protein}/${d.meta.protein}g P<br>${d.kcal}/${d.meta.kcal} kcal</span>
       </div>
-      <div class="card">${SLOTS.map((sl) => d.entries.find((x) => x.slot === sl.key) || {
+      ${SLOTS.map((sl) => d.entries.find((x) => x.slot === sl.key) || {
           slot: sl.key, title: null, portion: 1, recipe: null, prep: [],
         }).map((e, idx) => !e.recipe && !e.title ? `
-        <div class="slotline empty" data-date="${d.date}" data-slot="${e.slot}">
-          <span class="s">${e.slot}</span>
-          <span class="t"><em>nothing planned</em></span>
-          <span class="m">add ＋</span>
-        </div>` : `
-        <div class="slotline${e.recipe ? ' tappable' : ''}" data-day="${d.date}" data-i="${idx}">
-          <span class="s">${e.slot}</span>
-          <span class="t">${esc(e.title)}${e.portion !== 1 ? ` <span class="unit">×${e.portion}</span>` : ''}
-            ${(e.prep || []).map((t) => `<span class="prepflag" title="${esc(t.text)}">${
-              t.kind === 'marinade' ? '🫙' : t.kind === 'marinate' ? '🧂'
-              : t.kind === 'grain' ? '🍚' : '🔪'}</span>`).join('')}
-            ${e.note ? `<div class="unit" style="font-size:11.5px">${esc(e.note)}</div>` : ''}</span>
-          <span class="m">${e.recipe ? Math.round((e.recipe.calories_per_serving || 0) * e.portion) + ' kcal' : '—'}</span>
-        </div>
+        <button class="m-day__row slotline empty" data-date="${d.date}" data-slot="${e.slot}">
+          <span class="m-day__slot label m-up">${e.slot}</span>
+          <span class="m-day__name body m-faint">nothing planned</span>
+          <span class="m-day__kcal caption">add ＋</span>
+        </button>` : `
+        <button class="m-day__row slotline${e.recipe ? ' tappable' : ''}" data-day="${d.date}" data-i="${idx}">
+          <span class="m-day__slot label m-up">${e.slot}</span>
+          <span class="m-day__name body">${esc(e.title)}${e.portion !== 1 ? ` <span class="unit m-muted">×${e.portion}</span>` : ''}
+            ${e.note ? `<span class="caption m-muted" style="display:block">${esc(e.note)}</span>` : ''}</span>
+          ${(e.prep || []).length ? `<span class="m-prep label">${
+            (e.prep || []).some((t) => t.kind === 'marinade') ? 'JAR'
+            : (e.prep || []).some((t) => t.kind === 'marinate') ? 'MARINATE'
+            : (e.prep || []).some((t) => t.kind === 'grain') ? 'COOK AHEAD' : 'CHOP'}</span>` : ''}
+          <span class="m-day__kcal caption">${e.recipe ? Math.round((e.recipe.calories_per_serving || 0) * e.portion) + ' kcal' : '—'}</span>
+        </button>
         ${e.recipe ? `<div class="slotdetail" hidden>
-          <div class="acts planacts" data-date="${d.date}" data-slot="${e.slot}" data-recipe="${e.recipe.id || ''}">
-            <button class="swap">⇄ Swap</button>
-            <button class="portion" data-dir="-1">−¼</button>
-            <button class="portion" data-dir="1">+¼</button>
-            <button class="clear">Remove</button>
+          <div class="m-acts planacts" data-date="${d.date}" data-slot="${e.slot}" data-recipe="${e.recipe.id || ''}" style="margin-bottom:var(--space-3)">
+            <button class="m-act swap caption-strong">Swap</button>
+            <button class="m-act portion caption-strong" data-dir="-1" aria-label="Smaller portion">−¼</button>
+            <button class="m-act portion caption-strong" data-dir="1" aria-label="Larger portion">+¼</button>
+            <button class="m-act clear caption-strong">Remove</button>
           </div>
           ${(e.prep || []).length ? `<div class="prepbox"><strong>Prep before this</strong><ul>${
             e.prep.map((t) => `<li>${esc(t.text)}${
@@ -998,7 +926,7 @@ async function renderPlan() {
           }</ul></div>` : ''}
           ${recipeDetail(e.recipe, e.portion)}
         </div>` : ''}`).join('')}
-      </div>`;
+    </div>`;
   }).join('');
 
   wirePlanEditing();
@@ -1033,50 +961,48 @@ async function renderToday() {
   }), { kcal: 0, prot: 0 });
 
   el('today-macros').innerHTML =
-    macroCard('Calories', ate.kcal, d.kcal, ' kcal') +
     macroCard('Protein', ate.prot, d.protein, 'g') +
-    (eatenMeals.length ? '' : `<p class="empty">Nothing ticked off yet today.</p>`);
+    macroCard('Calories', ate.kcal, d.kcal, ' kcal', true) +
+    (eatenMeals.length ? '' : `<p class="m-sub caption">Nothing ticked off yet today.</p>`);
 
   const plan = planNow;
   const feedback = await tryRows('wt_recipe_feedback?select=recipe_id,verdict') || [];
   const verdicts = new Map(feedback.map((f) => [f.recipe_id, f.verdict]));
   if (!plan) {
-    el('today-plan').innerHTML = `<p class="empty">No recipes available to plan from.</p>`;
+    el('today-plan').innerHTML = `<p class="caption m-muted">No recipes available to plan from.</p>`;
   } else {
     const planned = plan.filter((p) => p.recipe);
     const kcal = planned.reduce((a, p) => a + (p.recipe.calories_per_serving || 0), 0);
     const prot = planned.reduce((a, p) => a + (p.recipe.protein_per_serving || 0), 0);
     el('today-plan').innerHTML = plan.map((p) =>
       planCard({ ...p, verdict: verdicts.get(p.recipe?.id) })).join('') +
-      `<div class="card"><div class="row"><strong>Plan total</strong>
-        <span>${Math.round(kcal)}<span class="unit"> / ${d.kcal} kcal</span> ·
-              ${Math.round(prot)}<span class="unit"> / ${d.protein}g P</span></span>
+      `<div class="m-meal"><div class="m-row">
+        <strong class="title-sm m-grow">Plan total</strong>
+        <span class="metric-sm">${Math.round(prot)}<span class="unit m-muted">/${d.protein}g P</span></span>
+        <span class="caption m-muted">${Math.round(kcal)}/${d.kcal} kcal</span>
       </div></div>`;
-    el('today-plan').querySelectorAll('.recipe').forEach((node) =>
-      node.addEventListener('click', (e) => {
-        if (e.target.closest('.acts')) return;   // buttons are not "expand"
-        node.classList.toggle('open');
-        TG?.HapticFeedback?.selectionChanged?.();
-      }));
-
     wireMealActions(plan);
   }
 
   const energy = await tryRows('wt_energy_scores?select=date,score&order=date.desc&limit=7');
   const supps  = await tryRows('wt_supplement_logs?select=date,completed&order=date.desc&limit=14');
   el('today-streaks').innerHTML = [
-    ['Energy today', energy?.[0]?.date === todayISO() ? `${energy[0].score}/5` : '—'],
-    ['Supplements', supps ? `${supps.filter((s) => s.completed).length}/14 slots` : '—'],
-    ['Plan week', week || '—'],
-    ['Day type', d.type],
-  ].map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${esc(v)}</div></div>`).join('');
+    ['Energy', energy?.[0]?.date === todayISO() ? `${energy[0].score}/5` : '—'],
+    ['Supps', supps ? `${supps.filter((x) => x.completed).length}/14` : '—'],
+    ['Week', week ? `${week}/24` : '—'],
+    ['Day', d.type],
+  ].map(([k, v]) => `<div class="m-stat">
+      <span class="m-stat__k label m-up">${k}</span>
+      <span class="m-stat__v metric-sm">${esc(v)}</span>
+    </div>`).join('');
 }
 
 async function renderProgress() {
   const weights = await tryRows('wt_weigh_ins?select=date,weight_kg&order=date.asc&limit=60');
   if (weights === null) {
-    el('progress-list').innerHTML =
-      `<div class="err">Progress tables aren't readable yet. Run <code>20261024133000_add_coach_tracking_tables.sql</code>, and make sure this app can read them.</div>`;
+    el('progress-list').innerHTML = `<div class="m-error">
+      <strong class="title-sm">Progress isn't readable</strong>
+      <span class="caption">The tracking tables are missing, or row-level security is blocking this view.</span></div>`;
     return;
   }
 
@@ -1101,16 +1027,20 @@ async function renderProgress() {
     const current = vals.length ? vals[vals.length - 1] : null;
     const target = m[milestone];
     const [cls, label] = current === null ? ['none', '⏸️ Insufficient data'] : statusFor(current, target, m.dir, vals.length);
-    return `<div class="card">
-      <div class="row">
-        <strong>${m.label}</strong>
-        <span class="status ${cls}">${label}</span>
+    const statusClass = cls === 'ok' ? 'm-status--ok' : cls === 'warn' ? 'm-status--risk'
+                      : cls === 'bad' ? 'm-status--off' : 'm-status--none';
+    return `<div class="m-metric">
+      <div class="m-metric__top">
+        <strong class="title-sm m-grow">${m.label}</strong>
+        <span class="m-status ${statusClass} label">${label.replace(/^[^ ]+ /, '')}</span>
       </div>
-      <div class="row" style="margin-top:4px">
-        <span class="big">${current ?? '—'}<span class="unit">${m.unit}</span></span>
-        <span class="unit">target ${target}${m.unit}</span>
+      <div class="m-metric__top">
+        <span class="metric-lg">${current ?? '—'}<span class="unit m-muted">${m.unit}</span></span>
+        <span class="m-grow"></span>
+        <span class="caption m-muted">target ${target}${m.unit}</span>
       </div>
-      ${sparkline(vals)}
+      ${vals.length > 1 ? sparkline(vals)
+        : `<div class="m-nodata caption">Not enough data yet — keep logging</div>`}
     </div>`;
   }).join('');
 }
@@ -1120,7 +1050,7 @@ async function renderRecipes() {
   if (!RECIPES.length) {
     const rows = await tryRows('wt_recipes?select=*&order=title');
     if (rows === null) {
-      el('recipe-list').innerHTML = `<div class="err">Couldn't load recipes.</div>`;
+      el('recipe-list').innerHTML = `<div class="m-error caption">Couldn't load recipes.</div>`;
       return;
     }
     RECIPES = rows;
@@ -1134,21 +1064,21 @@ function drawRecipes(q = '') {
     [r.title, r.cuisine_type, r.meal_type, ...(r.tags || [])].join(' ').toLowerCase().includes(term));
 
   el('recipe-list').innerHTML = list.length ? list.map((r, i) => `
-    <div class="card recipe" data-i="${i}">
-      <div class="row">
-        <h3>${esc(r.title)}</h3>
-        <span class="unit">${r.calories_per_serving ?? '—'} kcal</span>
+    <div class="m-recipe recipe${r.calories_per_serving == null ? ' m-stub' : ''}" data-i="${i}">
+      <div class="m-row" style="align-items:flex-start">
+        <h3 class="title-md m-grow" style="margin:0">${esc(r.title)}</h3>
+        <span class="metric-sm" style="white-space:nowrap">${r.calories_per_serving ?? '—'}<span class="unit m-muted"> kcal</span></span>
       </div>
-      <div class="macros">
+      <div class="caption m-muted">
         ${r.protein_per_serving ?? '—'}g protein · ${r.carbs_per_serving ?? '—'}g carbs · ${r.fat_per_serving ?? '—'}g fat
         ${r.servings ? ` · serves ${r.servings}` : ''}
       </div>
-      <div style="margin-top:7px">${(r.tags || []).slice(0, 3).map((t) => `<span class="pill">${esc(t)}</span>`).join('')}</div>
-      <div class="detail">
-        ${r.description ? `<p style="margin:0 0 8px">${esc(r.description)}</p>` : ''}
+      <div class="m-tags">${(r.tags || []).slice(0, 3).map((t) => `<span class="m-tag label">${esc(t)}</span>`).join('')}</div>
+      <div class="detail m-detail" style="border:0;padding:var(--space-3) 0 0">
+        ${r.description ? `<p class="caption m-muted" style="margin:0 0 8px">${esc(r.description)}</p>` : ''}
         ${recipeDetail(r, 1)}
       </div>
-    </div>`).join('') : `<p class="empty">No recipes match “${esc(q)}”.</p>`;
+    </div>`).join('') : `<p class="caption m-muted">No recipes match “${esc(q)}”.</p>`;
 
   document.querySelectorAll('.recipe').forEach((node) => {
     node.addEventListener('click', () => {
@@ -1182,7 +1112,7 @@ async function renderShopping() {
 
   if (!meals.length) {
     el('shopping-list').innerHTML =
-      `<p class="empty">No meals planned for this range. Ask Coach to plan the week.</p>`;
+      `<p class="caption m-muted">No meals planned for this range. Ask Coach to plan the week.</p>`;
     return;
   }
 
@@ -1252,25 +1182,38 @@ async function renderShopping() {
 
   el('shopping-list').innerHTML = ['Proteins', 'Produce', 'Cupboard', 'Other']
     .filter((g) => byGroup[g]?.length)
-    .map((g) => `<h2>${g}</h2><div class="card">${
-      byGroup[g].sort((a, b) => a.name.localeCompare(b.name)).map((it) => {
-        const id = 's-' + btoa(unescape(encodeURIComponent(it.name))).replace(/=/g, '');
-        const qty = it.units.size
-          ? ' — ' + [...it.units.entries()].map(([u, n]) => `${fmt(n, u)}${u ? ' ' + u : ''}`).join(' + ')
-          : '';
-        return `<label class="check${saved[id] ? ' done' : ''}">
-          <input type="checkbox" id="${id}"${saved[id] ? ' checked' : ''}>
-          <span>${esc(it.name)}<em class="qty">${esc(qty)}</em>
-          <em class="for">${esc([...it.meals].slice(0, 4).join(', '))}${it.meals.size > 4 ? ` +${it.meals.size - 4}` : ''}</em></span></label>`;
-      }).join('')
-    }</div>`).join('');
+    .map((g) => {
+      const items = byGroup[g].sort((a, b) => a.name.localeCompare(b.name));
+      return `<div class="m-day">
+        <div class="m-group"><span class="label m-up">${g}</span>
+          <span class="caption m-faint">${items.length}</span></div>
+        ${items.map((it) => {
+          const id = 's-' + btoa(unescape(encodeURIComponent(it.name))).replace(/=/g, '');
+          const qty = it.units.size
+            ? [...it.units.entries()].map(([u, n]) => `${fmt(n, u)}${u ? ' ' + u : ''}`).join(' + ')
+            : '';
+          return `<button class="m-ing" role="checkbox" id="${id}" aria-checked="${saved[id] ? 'true' : 'false'}">
+            <span class="m-ing__box">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
+            </span>
+            <span class="m-grow">
+              <span class="m-ing__name body">${esc(it.name)}</span>
+              <span class="m-ing__for caption">${esc([...it.meals].slice(0, 3).join(', '))}${
+                it.meals.size > 3 ? ` +${it.meals.size - 3}` : ''}</span>
+            </span>
+            <span class="m-ing__qty caption-strong">${esc(qty)}</span>
+          </button>`;
+        }).join('')}
+      </div>`;
+    }).join('');
 
-  el('shopping-list').querySelectorAll('input[type=checkbox]').forEach((box) => {
-    box.addEventListener('change', () => {
-      box.closest('label').classList.toggle('done', box.checked);
+  el('shopping-list').querySelectorAll('.m-ing').forEach((box) => {
+    box.addEventListener('click', () => {
+      const now = box.getAttribute('aria-checked') !== 'true';
+      box.setAttribute('aria-checked', String(now));
       const key = `wt-shopping-${todayISO()}-${shopDays}`;
       const state = JSON.parse(localStorage.getItem(key) || '{}');
-      state[box.id] = box.checked;
+      state[box.id] = now;
       localStorage.setItem(key, JSON.stringify(state));
       TG?.HapticFeedback?.impactOccurred?.('light');
     });
@@ -1284,11 +1227,15 @@ async function renderScorecard() {
   const batch  = await tryRows(`wt_batch_cook_logs?select=date,completed&date=gte.${since}`) || [];
 
   if (days === null) {
-    el('scorecard').innerHTML = `<div class="err">Daily totals aren't readable yet.</div>`;
+    el('scorecard').innerHTML = `<div class="m-error">
+      <strong class="title-sm">Can't read this week</strong>
+      <span class="caption">The daily totals table isn't reachable.</span></div>`;
     return;
   }
   if (!days.length) {
-    el('scorecard').innerHTML = `<p class="empty">No logged days yet this week. The coach fills this in as you log meals.</p>`;
+    el('scorecard').innerHTML = `<div class="m-empty">
+      <span class="body">Nothing logged yet this week.</span>
+      <span class="caption">Tick meals off on Today and this fills in.</span></div>`;
     return;
   }
 
@@ -1297,17 +1244,19 @@ async function renderScorecard() {
   const avgProt = Math.round(days.reduce((a, d) => a + (d.total_protein_g || 0), 0) / days.length);
   const avgEnergy = energy.length ? (energy.reduce((a, e) => a + e.score, 0) / energy.length).toFixed(1) : '—';
 
-  el('scorecard').innerHTML = `<div class="grid">
-    ${[['Protein target hit', `${hit}/${days.length}`],
+  el('scorecard').innerHTML = `<div class="m-metric"><div class="m-score">
+    ${[['Protein hit', `${hit}/${days.length}`],
        ['Avg calories', `${avgKcal}`],
        ['Avg protein', `${avgProt}g`],
        ['Avg energy', avgEnergy],
        ['Batch cooks', `${batch.filter((b) => b.completed).length}/2`],
        ['Days logged', `${days.length}/7`]]
-      .map(([k, v]) => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div></div>`).join('')}
+      .map(([k, v]) => `<div class="m-score__cell">
+        <span class="label m-up m-muted">${k}</span>
+        <span class="metric">${v}</span></div>`).join('')}
   </div>
   ${sparkline(days.map((d) => d.total_protein_g || 0))}
-  <p class="sub" style="margin-top:6px">Daily protein, last ${days.length} days</p>`;
+  <p class="caption m-muted" style="margin:6px 0 0">Daily protein, last ${days.length} days</p></div>`;
 }
 
 /* --- shell ---------------------------------------------------------------- */
@@ -1322,12 +1271,12 @@ const VIEWS = {
 
 function show(name) {
   for (const key of Object.keys(VIEWS)) el(`view-${key}`).hidden = key !== name;
-  document.querySelectorAll('nav button').forEach((b) =>
-    b.setAttribute('aria-current', String(b.dataset.view === name)));
+  document.querySelectorAll('.m-tab').forEach((b) =>
+    b.setAttribute('aria-selected', String(b.dataset.view === name)));
   VIEWS[name]();
 }
 
-document.querySelectorAll('nav button').forEach((b) =>
+document.querySelectorAll('.m-tab').forEach((b) =>
   b.addEventListener('click', () => { show(b.dataset.view); TG?.HapticFeedback?.selectionChanged?.(); }));
 
 el('recipe-search').addEventListener('input', (e) => drawRecipes(e.target.value));
@@ -1337,7 +1286,7 @@ function wireSegment(id, onPick) {
     const btn = e.target.closest('button');
     if (!btn) return;
     el(id).querySelectorAll('button').forEach((b) =>
-      b.setAttribute('aria-pressed', String(b === btn)));
+      b.setAttribute('aria-selected', String(b === btn)));
     TG?.HapticFeedback?.selectionChanged?.();
     onPick(Number(btn.dataset.days));
   });
@@ -1345,23 +1294,37 @@ function wireSegment(id, onPick) {
 wireSegment('plan-range', (d) => { planDays = d; renderPlan(); });
 wireSegment('shop-range', (d) => { shopDays = d; renderShopping(); });
 
-/* Telegram theme — fall back to the CSS defaults outside Telegram */
+/* Telegram chooses which WellTrack variant to show and owns the chrome at the
+   edges. It does not colour the content: the seven --tg-theme-* variables it
+   injects are read by wt-tokens.css behind WellTrack fallbacks. */
 function applyTheme() {
-  const p = TG?.themeParams;
-  if (!p) return;
-  const map = {
-    '--bg': p.bg_color, '--text': p.text_color, '--hint': p.hint_color,
-    '--link': p.link_color, '--button': p.button_color,
-    '--button-text': p.button_text_color, '--secondary-bg': p.secondary_bg_color,
-  };
-  for (const [k, v] of Object.entries(map)) if (v) document.documentElement.style.setProperty(k, v);
+  const dark = (TG?.colorScheme ?? 'dark') !== 'light';
+  document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+  const bg = TG?.themeParams?.bg_color;
+  const card = TG?.themeParams?.secondary_bg_color;
+  try {
+    if (bg) TG?.setBackgroundColor?.(bg);
+    if (card) TG?.setHeaderColor?.(card);
+    if (card) TG?.setBottomBarColor?.(card);
+  } catch { /* older Telegram clients do not have all three */ }
 }
 
-if (TG) { TG.ready(); TG.expand?.(); applyTheme(); TG.onEvent?.('themeChanged', applyTheme); }
+if (TG) {
+  TG.ready();
+  TG.expand?.();
+  applyTheme();
+  TG.onEvent?.('themeChanged', applyTheme);
+} else {
+  // Outside Telegram follow the OS, so the design can be checked both ways
+  const mq = window.matchMedia('(prefers-color-scheme: light)');
+  const setFromOS = () => document.documentElement.setAttribute('data-theme', mq.matches ? 'light' : 'dark');
+  setFromOS();
+  mq.addEventListener?.('change', setFromOS);
+}
 
 if (!CFG.url || !CFG.anonKey) {
   document.querySelector('main').innerHTML =
-    `<h1>Not configured</h1><div class="err">Copy <code>config.example.js</code> to <code>config.js</code> and fill in your Supabase URL and anon key.</div>`;
+    `<h1>Not configured</h1><div class="m-error caption">Copy <code>config.example.js</code> to <code>config.js</code> and fill in your Supabase URL and anon key.</div>`;
 } else {
   show('today');
 }

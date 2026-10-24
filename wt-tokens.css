@@ -1,0 +1,111 @@
+/* WellTrack tokens, compiled for the Telegram Mini App.
+   Seven tokens read Telegram's injected --tg-theme-* variables and fall back to
+   WellTrack's own value. Everything else is WellTrack-owned and never moves. */
+
+:root {
+  /* --- chrome layer: Telegram drives these seven --- */
+  --surface-base:   var(--tg-theme-bg-color, #0a0f1a);
+  --surface-card:   var(--tg-theme-secondary-bg-color, #121a27);
+  --surface-raised: var(--tg-theme-secondary-bg-color, #1b2533);
+  --ink:            var(--tg-theme-text-color, #f2f5f9);
+  --ink-muted:      var(--tg-theme-hint-color, #9fadc2);
+  --accent:         var(--tg-theme-link-color, #3b82f6);
+  --accent-fill:    var(--tg-theme-button-color, #2563eb);
+  --on-accent:      var(--tg-theme-button-text-color, #ffffff);
+
+  /* --- WellTrack-owned: fixed by colour scheme, never by themeParams --- */
+  --surface-inset: #080d16;
+  --border-subtle: #1f2a3a;
+  --border-strong: #5a6b87;
+  --ink-faint: #7b8ba3;
+  --accent-wash: rgba(59,130,246,0.16);
+  --success: #10b981;
+  --success-fill: #10b981;
+  --success-wash: rgba(16,185,129,0.16);
+  --warn: #f59e0b;
+  --warn-fill: #f59e0b;
+  --warn-wash: rgba(245,158,11,0.16);
+  --danger: #ef4444;
+  --danger-fill: #ef4444;
+  --danger-wash: rgba(239,68,68,0.16);
+  --focus-ring: #60a5fa;
+  --chart-track: #1f2a3a;
+  --chart-grid: rgba(242,245,249,0.08);
+  --scrim: rgba(4,8,15,0.74);
+  --sleep-deep: #4f46e5;
+  --sleep-light: #60a5fa;
+  --sleep-rem: #22d3ee;
+  --sleep-awake: #64748b;
+
+  --elev-card: 0 1px 2px rgba(0,0,0,0.45);
+  --elev-sheet: 0 -8px 32px rgba(0,0,0,0.6);
+  --elev-pop: 0 8px 24px rgba(0,0,0,0.55);
+
+  --space-1: 4px;  --space-2: 8px;  --space-3: 12px; --space-4: 16px;
+  --space-5: 20px; --space-6: 24px; --space-8: 32px; --space-10: 40px; --space-12: 48px;
+
+  --radius-sm: 8px;  --radius-md: 12px; --radius-lg: 16px;
+  --radius-xl: 20px; --radius-2xl: 28px; --radius-pill: 999px;
+
+  --icon-sm: 20px; --icon-md: 24px; --icon-lg: 32px;
+  --tap-min: 44px; --ring-hero: 152px; --ring-goal: 56px;
+  --stroke-hairline: 1px; --stroke-ring: 10px; --stroke-chart: 2px;
+  --gutter: 20px; --tabbar-h: 64px; --screen-w: 390px; --screen-h: 844px;
+
+  --font-sans: "Inter", -apple-system, "SF Pro Text", system-ui, sans-serif;
+}
+
+[data-theme="light"] {
+  --surface-base:   var(--tg-theme-bg-color, #f4f6fa);
+  --surface-card:   var(--tg-theme-secondary-bg-color, #ffffff);
+  --surface-raised: var(--tg-theme-secondary-bg-color, #ffffff);
+  --ink:            var(--tg-theme-text-color, #0d1520);
+  --ink-muted:      var(--tg-theme-hint-color, #55617a);
+  --accent:         var(--tg-theme-link-color, #1d4ed8);
+  --accent-fill:    var(--tg-theme-button-color, #2563eb);
+  --on-accent:      var(--tg-theme-button-text-color, #ffffff);
+
+  --surface-inset: #e9edf4;
+  --border-subtle: #e1e6ef;
+  --border-strong: #8a94a8;
+  --ink-faint: #6d7789;
+  --accent-wash: rgba(37,99,235,0.10);
+  --success: #047857;
+  --success-fill: #059669;
+  --success-wash: rgba(4,120,87,0.10);
+  --warn: #b45309;
+  --warn-fill: #d97706;
+  --warn-wash: rgba(180,83,9,0.10);
+  --danger: #b91c1c;
+  --danger-fill: #dc2626;
+  --danger-wash: rgba(185,28,28,0.10);
+  --focus-ring: #1d4ed8;
+  --chart-track: #e1e6ef;
+  --chart-grid: rgba(13,21,32,0.08);
+  --scrim: rgba(13,21,32,0.45);
+  --sleep-deep: #4338ca;
+  --sleep-light: #3b82f6;
+  --sleep-rem: #0e7490;
+  --sleep-awake: #94a3b8;
+
+  --elev-card: 0 1px 2px rgba(13,21,32,0.05), 0 2px 8px rgba(13,21,32,0.05);
+  --elev-sheet: 0 -6px 24px rgba(13,21,32,0.12);
+  --elev-pop: 0 8px 24px rgba(13,21,32,0.12);
+}
+
+/* --- type styles, one class per WellTrack style --- */
+.score { font-family: var(--font-sans); font-size: 56px; line-height: 56px; font-weight: 600; letter-spacing: -2px }
+.display-lg { font-family: var(--font-sans); font-size: 34px; line-height: 38px; font-weight: 600; letter-spacing: -0.8px }
+.display-md { font-family: var(--font-sans); font-size: 26px; line-height: 30px; font-weight: 600; letter-spacing: -0.6px }
+.title-lg { font-family: var(--font-sans); font-size: 20px; line-height: 26px; font-weight: 600; letter-spacing: -0.3px }
+.title-md { font-family: var(--font-sans); font-size: 17px; line-height: 22px; font-weight: 600; letter-spacing: -0.2px }
+.title-sm { font-family: var(--font-sans); font-size: 15px; line-height: 20px; font-weight: 600; letter-spacing: -0.1px }
+.body { font-family: var(--font-sans); font-size: 15px; line-height: 21px; font-weight: 400 }
+.body-strong { font-family: var(--font-sans); font-size: 15px; line-height: 21px; font-weight: 600 }
+.caption { font-family: var(--font-sans); font-size: 13px; line-height: 18px; font-weight: 400 }
+.caption-strong { font-family: var(--font-sans); font-size: 13px; line-height: 18px; font-weight: 600 }
+.label { font-family: var(--font-sans); font-size: 11px; line-height: 14px; font-weight: 600; letter-spacing: 0.7px }
+.metric-lg { font-family: var(--font-sans); font-size: 24px; line-height: 28px; font-weight: 600; letter-spacing: -0.5px }
+.metric { font-family: var(--font-sans); font-size: 20px; line-height: 24px; font-weight: 600; letter-spacing: -0.4px }
+.metric-sm { font-family: var(--font-sans); font-size: 15px; line-height: 18px; font-weight: 600; letter-spacing: -0.1px }
+.unit { font-family: var(--font-sans); font-size: 12px; line-height: 16px; font-weight: 500; letter-spacing: 0.2px }
