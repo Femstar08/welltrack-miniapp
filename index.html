@@ -1272,20 +1272,136 @@ function drawRecipes(q = '') {
 /** Ingredients for today's planned meals, grouped for the aisle. */
 let shopDays = 1;
 
+/* Ingredient strings are written for a cook, not a shopper: "onion, diced",
+   "boneless chicken thighs, skinless", "rocket (arugula)". Three different
+   jobs have to be kept apart.
+     - the MERGE KEY decides what counts as the same line
+     - the DISPLAY NAME is what you read in the shop, so it keeps the detail
+       that matters when buying ("lean beef mince (5% fat)")
+     - the AISLE decides where the line sits
+   Running them off one mangled lowercase string is what put "chopped tomatoe"
+   and "bay leave" on the list and filed beef stock under Proteins. */
+
+/** Things that appear in a recipe but are not bought. */
+const NOT_SHOPPING = /^(ice cubes?|cold water( or coconut water)?|water|tap water|boiling water)$/i;
+
+/** Not a raw ingredient — a thing that is cooked, jarred or bought ready-made.
+    These get their own group, because "stewed beef offal" on a shopping list
+    with no dish beside it is unreadable. */
+const READY_MADE = /\b(stewed|pre-?made|puff ?puff|akara|marinade|sofrito)\b/i;
+
+/* Aisle rules, tested in order — the first match wins, so the cupboard
+   markers come first. "garlic powder" is a spice and not produce; "beef
+   stock" is a carton and not meat; "tomato puree" is a tin. */
+const AISLES = [
+  ['Proteins', /\bprotein powder\b/i],
+  // flesh and dairy before anything else, or "hot-smoked salmon flakes" is
+  // filed by "flakes" and "raw king prawns" by "raw". Stock is the exception:
+  // "beef stock" is a carton.
+  ['Proteins', /\b(chicken|beef|turkey|pork|lamb|salmon|tuna|mackerel|prawns?|fish|offal|eggs?|mince)\b(?!.*\bstock\b)/i],
+  ['Cupboard', /\b(peanut|almond|cashew|nut) butter\b/i],
+  ['Proteins', /yogh?urt|feta|mozzarella|cheddar|cheese|\bmilk\b|butter/i],
+  ['Produce', /^(fresh|baby|raw|ripe)\b/i],
+  ['Cupboard', /\b(powder|ground|dried|flakes?|seeds?|stock|cube|sauce|paste|puree|tinned|canned|vinegar|oil|honey|syrup|mirin|gochujang|mayonnaise|breadcrumbs?|flour|rice|oats?|bread|pasta|noodles?|beans?|lentils?|chickpeas?|nuts?|almonds?|walnuts?|peanut|crayfish|seasoning|paprika|cumin|oregano|cinnamon|nutmeg|allspice|cayenne|curry|turmeric|bay leaves?)\b/i],
+  ['Cupboard', /\b(black|white|cayenne|chilli|ground) pepper\b|^pepper$|^salt\b|\bsea salt\b|salt and (black )?pepper|peppercorn|\bthyme\b(?!.*fresh)/i],
+  ['Produce', /pepper|onion|garlic|spinach|tomato|lemon|lime|plantain|avocado|herb|coriander|parsley|dill|chive|rocket|ginger|beetroot|blueberr|banana|broccoli|mushroom|cabbage|carrot|cucumber|chilli|scotch bonnet|salad|leaves|chard|greens|radicchio|\byam\b|potato|fruit|fries|chips/i],
+];
+
+/* Variants of one thing that should be a single line. The value is also what
+   the line is called, so it reads the way you would write it down. */
+const SYNONYMS = [
+  [/^(boneless |bone-in )?chicken thighs?\b.*/, 'Chicken thighs'],
+  [/^chicken breast.*/, 'Chicken breast'],
+  [/^(whole )?eggs?$/, 'Eggs'],
+  [/^feta( cheese)?$/, 'Feta'],
+  [/^(baby |fresh )?spinach$/, 'Spinach'],
+  [/^salmon fillets?\b.*/, 'Salmon fillets'],
+  [/^(extra virgin )?olive oil$/, 'Olive oil'],
+  [/^greek yogh?urt.*/, 'Greek yoghurt (0% fat)'],
+  [/^(red |white )?onions?$/, 'Onion'],
+  [/^garlic cloves?$/, 'Garlic cloves'],
+  [/^lemons?$/, 'Lemon'],
+  [/^(red bell|red) peppers?$/, 'Red pepper'],
+  [/^spring onions?$/, 'Spring onion'],
+  [/^(tinned )?plum tomatoes?$/, 'Tinned plum tomatoes'],
+  [/^(tinned )?chopped tomatoes?$/, 'Tinned chopped tomatoes'],
+  [/^(red )?kidney beans?$/, 'Red kidney beans'],
+  [/^scotch bonnet( chilli| pepper| or chilli)?$/, 'Scotch bonnet'],
+  [/^(sea )?salt$/, 'Salt'],
+  [/^(black )?pepper$/, 'Black pepper'],
+  [/^salt and (black )?pepper$/, 'Salt and black pepper'],
+  [/^fresh thyme( leaves)?$/, 'Fresh thyme'],
+  [/^(dried thyme|thyme, dried|thyme)$/, 'Dried thyme'],
+  [/^vegetable oil( for frying)?$/, 'Vegetable oil'],
+  [/^(ground )?crayfish$/, 'Ground crayfish'],
+  [/^red lentils?$/, 'Red lentils'],
+];
+
+/* The unit field holds whatever the recipe writer typed: "cloves" and "clove",
+   "kg" and "g", and sometimes a prep instruction ("halved") where a unit
+   should be. Left alone that splits one line into two half-quantities. */
+const UNIT_COUNT = ['whole', 'large', 'medium', 'small', 'piece', 'pieces',
+  'halved', 'sliced', 'chopped', 'diced', 'crushed', 'minced'];
+
+/** Returns [canonical unit, multiplier to apply to the quantity]. */
+function normaliseUnit(raw) {
+  const u = String(raw || '').toLowerCase().trim();
+  if (!u || UNIT_COUNT.includes(u)) return ['', 1];
+  if (u === 'kg') return ['g', 1000];
+  if (u === 'l' || u === 'litre' || u === 'litres') return ['ml', 1000];
+  if (u === 'tbs' || u === 'tbsp.') return ['tbsp', 1];
+  if (/(ch|sh|x)es$/.test(u)) return [u.slice(0, -2), 1];
+  if (u.length > 2 && u.endsWith('s') && !u.endsWith('ss')) return [u.slice(0, -1), 1];
+  return [u, 1];
+}
+
+/** Spoons are volume, so they fold into ml for anything already measured in ml. */
+function foldSpoons(units) {
+  if (!units.has('ml')) return units;
+  const out = new Map(units);
+  for (const [u, mult] of [['tbsp', 15], ['tsp', 5]]) {
+    if (out.has(u)) { out.set('ml', out.get('ml') + out.get(u) * mult); out.delete(u); }
+  }
+  return out;
+}
+
+/** Merge key — aggressive, never shown. */
+function ingredientKey(name) {
+  const base = name.toLowerCase().replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+  for (const [re, to] of SYNONYMS) if (re.test(base)) return to.toLowerCase();
+  return base.replace(/ies$/, 'y').replace(/([^s])s$/, '$1');
+}
+
+/** What a synonym renamed this to, if anything. */
+function ingredientSynonym(name) {
+  const base = name.toLowerCase().replace(/\s*\(.*?\)\s*/g, ' ').replace(/\s+/g, ' ').trim();
+  for (const [re, to] of SYNONYMS) if (re.test(base)) return to;
+  return null;
+}
+
+function ingredientAisle(name) {
+  if (READY_MADE.test(name)) return 'Make or buy ahead';
+  for (const [aisle, re] of AISLES) if (re.test(name)) return aisle;
+  return 'Other';
+}
+
 async function renderShopping() {
   let meals = [];
 
+  // Every line has to say which dish it is for — "stewed beef offal" means
+  // nothing until you know it is the Nigerian Breakfast Plate — so the recipe
+  // title travels with the ingredient, not just the day.
   if (shopDays === 1) {
     const plan = await todaysPlan();
     meals = (plan || []).filter((p) => p.recipe)
-      .map((p) => ({ recipe: p.recipe, portion: 1, label: p.slot.label }));
+      .map((p) => ({ recipe: p.recipe, portion: p.portion || 1, title: p.recipe.title, when: 'Today' }));
     el('shopping-sub').textContent = meals.length
       ? `For today's ${meals.length} meals`
       : 'Nothing planned for today';
   } else {
     const days = await planRange(todayISO(), shopDays);
     meals = days.flatMap((d) => d.entries.filter((e) => e.recipe)
-      .map((e) => ({ recipe: e.recipe, portion: e.portion, label: dayLabel(d.date) })));
+      .map((e) => ({ recipe: e.recipe, portion: e.portion, title: e.recipe.title, when: dayLabel(d.date) })));
     el('shopping-sub').textContent = days.length
       ? `For ${days.length} planned days — ${meals.length} meals`
       : `Nothing planned for the next ${shopDays} days`;
@@ -1297,90 +1413,80 @@ async function renderShopping() {
     return;
   }
 
-  const GROUPS = {
-    Proteins: /chicken|salmon|turkey|beef|prawn|tuna|egg|mackerel|mince|yoghurt|feta|cheese|milk|protein powder/i,
-    Produce:  /pepper|onion|garlic|spinach|tomato|lemon|lime|plantain|avocado|herb|coriander|parsley|dill|thyme|chive|rocket|ginger|beetroot|blueberr|banana|broccoli|mushroom/i,
-    Cupboard: /rice|oat|bread|bean|lentil|chickpea|flour|honey|oil|vinegar|soy|stock|mirin|seed|nut|salt|pepper|paprika|cumin|oregano|cinnamon|nutmeg|allspice|cayenne|curry|powder|puree|marinade|sofrito/i,
-  };
-
-  // Same ingredient across two meals is one line, with the portions added up
-  // Same ingredient across meals becomes one line, quantities summed per unit
-  // and scaled by the portion the plan calls for.
   // Recipes list quantities for the whole batch, so a 1000g/5-serving tray is
   // 200g for one plate. Everything is reduced to per-serving before scaling by
   // the portion the plan calls for.
-  const SYNONYMS = [
-    [/^(boneless |bone-in )?chicken thighs?.*/, 'chicken thighs'],
-    [/^chicken breast.*/, 'chicken breast'],
-    [/^(whole )?eggs?$/, 'eggs'],
-    [/^feta( cheese)?$/, 'feta'],
-    [/^(baby |fresh )?spinach$/, 'spinach'],
-    [/^salmon fillets?$/, 'salmon fillets'],
-    [/^(extra virgin )?olive oil$/, 'olive oil'],
-    [/^greek yogh?urt.*/, 'Greek yoghurt (0% fat)'],
-    [/^(red |white )?onions?$/, 'onion'],
-    [/^garlic cloves?$/, 'garlic cloves'],
-    [/^lemons?$/, 'lemon'],
-    [/^red peppers?$/, 'red pepper'],
-    [/^spring onions?$/, 'spring onion'],
-  ];
-  const canonical = (raw) => {
-    const base = raw.toLowerCase().replace(/\s*\(.*?\)\s*/g, ' ').trim();
-    for (const [re, to] of SYNONYMS) if (re.test(base)) return to;
-    return base.replace(/s$/, '');
-  };
-
   const items = new Map();
-  for (const { recipe, portion, label } of meals) {
+  for (const { recipe, portion, title } of meals) {
     const serves = recipe.servings || 1;
     for (const g of recipe.ingredients || []) {
-      const name = (g.item || '').replace(/,.*$/, '').trim();
-      if (!name) continue;
-      const key = canonical(name);
-      const group = Object.keys(GROUPS).find((k) => GROUPS[k].test(name)) || 'Other';
-      const prev = items.get(key) || { name: key, group, units: new Map(), meals: new Set() };
+      const full = (g.item || '').trim();
+      const name = full.replace(/,.*$/, '').trim();
+      if (!name || NOT_SHOPPING.test(name)) continue;
+
+      const key = ingredientKey(name);
+      const prev = items.get(key) || {
+        key, names: [], aisle: ingredientAisle(name),
+        units: new Map(), dishes: new Map(),
+      };
+      prev.names.push(name);
       if (g.quantity) {
-        // 'whole', 'large' and blank all mean "count of them"
-        const raw = (g.unit || '').toLowerCase();
-        const unit = ['whole', 'large', 'medium', 'piece', 'pieces'].includes(raw) ? '' : raw;
-        const perServing = (g.quantity / serves) * portion;
-        prev.units.set(unit, (prev.units.get(unit) || 0) + perServing);
+        const [unit, scale] = normaliseUnit(g.unit);
+        prev.units.set(unit, (prev.units.get(unit) || 0) + (g.quantity * scale / serves) * portion);
       }
-      prev.meals.add(label);
+      prev.dishes.set(title, (prev.dishes.get(title) || 0) + 1);
       items.set(key, prev);
     }
   }
 
-  // Round sensibly: grams and ml to whole numbers, counts and spoons to a half
+  // Shown name: whatever a synonym renamed it to, else the shortest spelling
+  // seen — the shortest is the one without the chopping instruction attached.
+  for (const it of items.values()) {
+    const syn = ingredientSynonym(it.names[0]);
+    const shortest = [...it.names].sort((a, b) => a.length - b.length)[0]
+      .replace(/\s*\(see [^)]*\)/i, '');
+    it.name = syn || shortest.charAt(0).toUpperCase() + shortest.slice(1);
+  }
+
+  // Round sensibly: grams and ml to whole numbers, counts and spoons to a half.
+  // Never round down to nothing — a sixth of a stock cube is still one cube to
+  // buy, and "0 cube" on a shopping list is just wrong.
   const fmt = (n, unit) => {
-    if (unit === 'g' || unit === 'ml') return String(Math.round(n));
-    return String(Math.round(n * 2) / 2);
+    if (unit === 'g' || unit === 'ml') return String(Math.max(1, Math.round(n)));
+    const half = Math.round(n * 2) / 2;
+    return String(half || Math.round(n * 10) / 10 || 1);
   };
 
   const saved = JSON.parse(localStorage.getItem(`wt-shopping-${todayISO()}-${shopDays}`) || '{}');
-  const byGroup = {};
-  for (const it of items.values()) (byGroup[it.group] ||= []).push(it);
+  const byAisle = {};
+  for (const it of items.values()) (byAisle[it.aisle] ||= []).push(it);
 
-  el('shopping-list').innerHTML = ['Proteins', 'Produce', 'Cupboard', 'Other']
-    .filter((g) => byGroup[g]?.length)
+  el('shopping-list').innerHTML = ['Proteins', 'Produce', 'Cupboard', 'Make or buy ahead', 'Other']
+    .filter((g) => byAisle[g]?.length)
     .map((g) => {
-      const items = byGroup[g].sort((a, b) => a.name.localeCompare(b.name));
+      const list = byAisle[g].sort((a, b) => a.name.localeCompare(b.name));
       return `<div class="m-day">
         <div class="m-group"><span class="label m-up">${g}</span>
-          <span class="caption m-faint">${items.length}</span></div>
-        ${items.map((it) => {
-          const id = 's-' + btoa(unescape(encodeURIComponent(it.name))).replace(/=/g, '');
-          const qty = it.units.size
-            ? [...it.units.entries()].map(([u, n]) => `${fmt(n, u)}${u ? ' ' + u : ''}`).join(' + ')
+          <span class="caption m-faint">${list.length}</span></div>
+        ${list.map((it) => {
+          // The id is built from the merge key, never the shown name, so a
+          // wording change does not orphan everything already ticked off.
+          const id = 's-' + btoa(unescape(encodeURIComponent(it.key))).replace(/=/g, '');
+          const units = foldSpoons(it.units);
+          const qty = units.size
+            ? [...units.entries()].map(([u, n]) => `${fmt(n, u)}${u ? ' ' + u : ''}`).join(' + ')
             : '';
+          const dishes = [...it.dishes.entries()]
+            .map(([t, n]) => n > 1 ? `${t} ×${n}` : t);
+          const forLine = dishes.slice(0, 2).join(', ') +
+            (dishes.length > 2 ? ` +${dishes.length - 2} more` : '');
           return `<button class="m-ing" role="checkbox" id="${id}" aria-checked="${saved[id] ? 'true' : 'false'}">
             <span class="m-ing__box">
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" aria-hidden="true"><path d="M20 6L9 17l-5-5"/></svg>
             </span>
             <span class="m-grow">
               <span class="m-ing__name body">${esc(it.name)}</span>
-              <span class="m-ing__for caption">${esc([...it.meals].slice(0, 3).join(', '))}${
-                it.meals.size > 3 ? ` +${it.meals.size - 3}` : ''}</span>
+              <span class="m-ing__for caption">${esc(forLine)}</span>
             </span>
             <span class="m-ing__qty caption-strong">${esc(qty)}</span>
           </button>`;
