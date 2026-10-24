@@ -83,6 +83,24 @@
   label.check em.qty { font-style: normal; color: var(--hint); }
   label.check em.for { display: block; font-style: normal; font-size: 11.5px; color: var(--hint); }
 
+  .seg { display: flex; gap: 6px; margin-bottom: 12px; }
+  .seg button {
+    flex: 1; border: 0; border-radius: 9px; padding: 8px 4px; cursor: pointer;
+    background: var(--secondary-bg); color: var(--hint);
+    font: 600 12.5px/1 inherit;
+  }
+  .seg button[aria-pressed="true"] { background: var(--button); color: var(--button-text); }
+  .dayhead { display: flex; align-items: baseline; justify-content: space-between;
+             margin: 18px 0 7px; gap: 8px; }
+  .dayhead strong { font-size: 14px; }
+  .dayhead .totals { font-size: 12px; color: var(--hint); white-space: nowrap; }
+  .dayhead .totals.short { color: var(--warn); }
+  .slotline { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0;
+              border-bottom: 1px solid var(--border); font-size: 13.5px; }
+  .slotline:last-child { border-bottom: 0; }
+  .slotline .s { color: var(--hint); width: 74px; flex: none; font-size: 12px; padding-top: 1px; }
+  .slotline .t { flex: 1; }
+  .slotline .m { color: var(--hint); font-size: 12px; white-space: nowrap; }
   table.ex { width: 100%; border-collapse: collapse; margin-top: 11px; font-size: 13.5px; }
   table.ex th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .05em;
                 color: var(--hint); font-weight: 600; padding: 0 0 5px; }
@@ -130,9 +148,22 @@
     <div class="grid" id="today-streaks"></div>
   </section>
 
+  <section id="view-plan" hidden>
+    <h1>Meal plan</h1>
+    <p class="sub" id="plan-sub">What's coming up</p>
+    <div class="seg" id="plan-range">
+      <button data-days="7" aria-pressed="true">This week</button>
+      <button data-days="14">Two weeks</button>
+    </div>
+    <div id="plan-days"></div>
+  </section>
+
   <section id="view-progress" hidden>
     <h1>Progress</h1>
-    <p class="sub" id="progress-sub">Against the 6-month glide path</p>
+    <h2>Last 7 days</h2>
+    <div id="scorecard"></div>
+    <h2>Against the glide path</h2>
+    <p class="sub" id="progress-sub">—</p>
     <div id="progress-list"></div>
   </section>
 
@@ -145,22 +176,24 @@
   <section id="view-shopping" hidden>
     <h1>Ingredients</h1>
     <p class="sub" id="shopping-sub">For today's meals</p>
+    <div class="seg" id="shop-range">
+      <button data-days="1" aria-pressed="true">Today</button>
+      <button data-days="3">3 days</button>
+      <button data-days="7">Week</button>
+      <button data-days="14">Fortnight</button>
+    </div>
     <div id="shopping-list"></div>
   </section>
 
-  <section id="view-scorecard" hidden>
-    <h1>Scorecard</h1>
-    <p class="sub">Last 7 days</p>
-    <div id="scorecard"></div>
-  </section>
+
 </main>
 
 <nav>
   <button data-view="today" aria-current="true"><em>📊</em>Today</button>
+  <button data-view="plan"><em>🗓️</em>Plan</button>
   <button data-view="progress"><em>📈</em>Progress</button>
   <button data-view="recipes"><em>🍳</em>Recipes</button>
   <button data-view="shopping"><em>🛒</em>Ingredients</button>
-  <button data-view="scorecard"><em>🏁</em>Score</button>
 </nav>
 
 <script>
@@ -433,6 +466,113 @@ function planCard({ slot, recipe, source, note }) {
   </div>`;
 }
 
+
+/* --- a plan for any date range ------------------------------------------ */
+
+const addDays = (iso, n) => {
+  const d = new Date(`${iso}T12:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + n);
+  return d.toISOString().slice(0, 10);
+};
+const weekdayOf = (iso) => new Date(`${iso}T12:00:00Z`).getUTCDay();
+const DAY_META = [
+  { day: 'Sunday', type: 'full rest', kcal: 1800, protein: 160 },
+  { day: 'Monday', type: 'training', kcal: 2200, protein: 180 },
+  { day: 'Tuesday', type: 'rest', kcal: 1900, protein: 170 },
+  { day: 'Wednesday', type: 'training', kcal: 2200, protein: 180 },
+  { day: 'Thursday', type: 'training', kcal: 2200, protein: 180 },
+  { day: 'Friday', type: 'training', kcal: 2200, protein: 180 },
+  { day: 'Saturday', type: 'rest', kcal: 1900, protein: 170 },
+];
+
+/**
+ * Saved plan rows for a range, joined to recipes and grouped by date.
+ * Returns [] when nothing is saved — the Plan tab says so rather than
+ * inventing a fortnight the coach never agreed to.
+ */
+async function planRange(start, days) {
+  const recipes = await allRecipes();
+  const end = addDays(start, days - 1);
+  const rows = await tryRows(
+    `wt_coach_daily_plan?select=date,slot,recipe_id,recipe_title,portion,note` +
+    `&date=gte.${start}&date=lte.${end}&order=date,slot`);
+  if (!rows || !rows.length) return [];
+
+  const byId = new Map(recipes.map((r) => [r.id, r]));
+  const byTitle = new Map(recipes.map((r) => [r.title.toLowerCase(), r]));
+  const order = { breakfast: 0, lunch: 1, dinner: 2, snack: 3 };
+  const byDate = new Map();
+
+  for (const row of rows) {
+    const recipe = (row.recipe_id && byId.get(row.recipe_id)) ||
+                   byTitle.get((row.recipe_title || '').toLowerCase()) || null;
+    const entry = {
+      slot: row.slot,
+      title: row.recipe_title,
+      portion: Number(row.portion) || 1,
+      note: row.note,
+      recipe,
+    };
+    if (!byDate.has(row.date)) byDate.set(row.date, []);
+    byDate.get(row.date).push(entry);
+  }
+
+  return [...byDate.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([date, entries]) => {
+      entries.sort((a, b) => (order[a.slot] ?? 9) - (order[b.slot] ?? 9));
+      const meta = DAY_META[weekdayOf(date)];
+      const kcal = entries.reduce((a, e) => a + (e.recipe?.calories_per_serving || 0) * e.portion, 0);
+      const protein = entries.reduce((a, e) => a + (e.recipe?.protein_per_serving || 0) * e.portion, 0);
+      return { date, meta, entries, kcal: Math.round(kcal), protein: Math.round(protein) };
+    });
+}
+
+function dayLabel(iso) {
+  const d = new Date(`${iso}T12:00:00Z`);
+  const today = todayISO();
+  if (iso === today) return 'Today';
+  if (iso === addDays(today, 1)) return 'Tomorrow';
+  return d.toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+}
+
+/* --- the Plan tab -------------------------------------------------------- */
+
+let planDays = 7;
+
+async function renderPlan() {
+  const start = todayISO();
+  const days = await planRange(start, planDays);
+
+  if (!days.length) {
+    el('plan-days').innerHTML =
+      `<p class="empty">Nothing planned yet. Ask Coach for the week's meal plan in Telegram —
+       whatever it sends you is saved here automatically.</p>`;
+    el('plan-sub').textContent = 'No plan saved';
+    return;
+  }
+
+  const planned = days.length;
+  el('plan-sub').textContent =
+    `${planned} day${planned === 1 ? '' : 's'} planned from ${dayLabel(days[0].date).toLowerCase()}`;
+
+  el('plan-days').innerHTML = days.map((d) => {
+    const short = d.protein < d.meta.protein - 10;
+    return `<div class="dayhead">
+        <strong>${dayLabel(d.date)} · <span class="unit">${d.meta.type}</span></strong>
+        <span class="totals${short ? ' short' : ''}">${d.kcal}/${d.meta.kcal} kcal · ${d.protein}/${d.meta.protein}g P</span>
+      </div>
+      <div class="card">${d.entries.map((e) => `
+        <div class="slotline">
+          <span class="s">${e.slot}</span>
+          <span class="t">${esc(e.title)}${e.portion !== 1 ? ` <span class="unit">×${e.portion}</span>` : ''}
+            ${e.note ? `<div class="unit" style="font-size:11.5px">${esc(e.note)}</div>` : ''}</span>
+          <span class="m">${e.recipe ? Math.round((e.recipe.calories_per_serving || 0) * e.portion) + ' kcal' : '—'}</span>
+        </div>`).join('')}
+      </div>`;
+  }).join('');
+}
+
 /* --- views ---------------------------------------------------------------- */
 
 async function renderToday() {
@@ -574,17 +714,32 @@ function drawRecipes(q = '') {
 }
 
 /** Ingredients for today's planned meals, grouped for the aisle. */
-async function renderShopping() {
-  const plan = await todaysPlan();
-  const meals = (plan || []).filter((p) => p.recipe);
+let shopDays = 1;
 
-  if (!meals.length) {
-    el('shopping-list').innerHTML = `<p class="empty">No meals planned for today yet.</p>`;
-    return;
+async function renderShopping() {
+  let meals = [];
+
+  if (shopDays === 1) {
+    const plan = await todaysPlan();
+    meals = (plan || []).filter((p) => p.recipe)
+      .map((p) => ({ recipe: p.recipe, portion: 1, label: p.slot.label }));
+    el('shopping-sub').textContent = meals.length
+      ? `For today's ${meals.length} meals`
+      : 'Nothing planned for today';
+  } else {
+    const days = await planRange(todayISO(), shopDays);
+    meals = days.flatMap((d) => d.entries.filter((e) => e.recipe)
+      .map((e) => ({ recipe: e.recipe, portion: e.portion, label: dayLabel(d.date) })));
+    el('shopping-sub').textContent = days.length
+      ? `For ${days.length} planned days — ${meals.length} meals`
+      : `Nothing planned for the next ${shopDays} days`;
   }
 
-  el('shopping-sub').textContent =
-    `For today's ${meals.length} meals: ${meals.map((m) => m.recipe.title).join(', ')}`;
+  if (!meals.length) {
+    el('shopping-list').innerHTML =
+      `<p class="empty">No meals planned for this range. Ask Coach to plan the week.</p>`;
+    return;
+  }
 
   const GROUPS = {
     Proteins: /chicken|salmon|turkey|beef|prawn|tuna|egg|mackerel|mince|yoghurt|feta|cheese|milk|protein powder/i,
@@ -593,21 +748,60 @@ async function renderShopping() {
   };
 
   // Same ingredient across two meals is one line, with the portions added up
+  // Same ingredient across meals becomes one line, quantities summed per unit
+  // and scaled by the portion the plan calls for.
+  // Recipes list quantities for the whole batch, so a 1000g/5-serving tray is
+  // 200g for one plate. Everything is reduced to per-serving before scaling by
+  // the portion the plan calls for.
+  const SYNONYMS = [
+    [/^(boneless |bone-in )?chicken thighs?.*/, 'chicken thighs'],
+    [/^chicken breast.*/, 'chicken breast'],
+    [/^(whole )?eggs?$/, 'eggs'],
+    [/^feta( cheese)?$/, 'feta'],
+    [/^(baby |fresh )?spinach$/, 'spinach'],
+    [/^salmon fillets?$/, 'salmon fillets'],
+    [/^(extra virgin )?olive oil$/, 'olive oil'],
+    [/^greek yogh?urt.*/, 'Greek yoghurt (0% fat)'],
+    [/^(red |white )?onions?$/, 'onion'],
+    [/^garlic cloves?$/, 'garlic cloves'],
+    [/^lemons?$/, 'lemon'],
+    [/^red peppers?$/, 'red pepper'],
+    [/^spring onions?$/, 'spring onion'],
+  ];
+  const canonical = (raw) => {
+    const base = raw.toLowerCase().replace(/\s*\(.*?\)\s*/g, ' ').trim();
+    for (const [re, to] of SYNONYMS) if (re.test(base)) return to;
+    return base.replace(/s$/, '');
+  };
+
   const items = new Map();
-  for (const { recipe, slot } of meals) {
+  for (const { recipe, portion, label } of meals) {
+    const serves = recipe.servings || 1;
     for (const g of recipe.ingredients || []) {
       const name = (g.item || '').replace(/,.*$/, '').trim();
       if (!name) continue;
-      const keyName = name.toLowerCase();
+      const key = canonical(name);
       const group = Object.keys(GROUPS).find((k) => GROUPS[k].test(name)) || 'Other';
-      const prev = items.get(keyName) || { name, group, parts: [], meals: new Set() };
-      if (g.quantity) prev.parts.push(`${g.quantity}${g.unit && g.unit !== 'whole' ? ' ' + g.unit : ''}`);
-      prev.meals.add(slot.label);
-      items.set(keyName, prev);
+      const prev = items.get(key) || { name: key, group, units: new Map(), meals: new Set() };
+      if (g.quantity) {
+        // 'whole', 'large' and blank all mean "count of them"
+        const raw = (g.unit || '').toLowerCase();
+        const unit = ['whole', 'large', 'medium', 'piece', 'pieces'].includes(raw) ? '' : raw;
+        const perServing = (g.quantity / serves) * portion;
+        prev.units.set(unit, (prev.units.get(unit) || 0) + perServing);
+      }
+      prev.meals.add(label);
+      items.set(key, prev);
     }
   }
 
-  const saved = JSON.parse(localStorage.getItem('wt-shopping-' + todayISO()) || '{}');
+  // Round sensibly: grams and ml to whole numbers, counts and spoons to a half
+  const fmt = (n, unit) => {
+    if (unit === 'g' || unit === 'ml') return String(Math.round(n));
+    return String(Math.round(n * 2) / 2);
+  };
+
+  const saved = JSON.parse(localStorage.getItem(`wt-shopping-${todayISO()}-${shopDays}`) || '{}');
   const byGroup = {};
   for (const it of items.values()) (byGroup[it.group] ||= []).push(it);
 
@@ -616,18 +810,20 @@ async function renderShopping() {
     .map((g) => `<h2>${g}</h2><div class="card">${
       byGroup[g].sort((a, b) => a.name.localeCompare(b.name)).map((it) => {
         const id = 's-' + btoa(unescape(encodeURIComponent(it.name))).replace(/=/g, '');
-        const qty = it.parts.length ? ` — ${it.parts.join(' + ')}` : '';
+        const qty = it.units.size
+          ? ' — ' + [...it.units.entries()].map(([u, n]) => `${fmt(n, u)}${u ? ' ' + u : ''}`).join(' + ')
+          : '';
         return `<label class="check${saved[id] ? ' done' : ''}">
           <input type="checkbox" id="${id}"${saved[id] ? ' checked' : ''}>
           <span>${esc(it.name)}<em class="qty">${esc(qty)}</em>
-          <em class="for">${esc([...it.meals].join(', '))}</em></span></label>`;
+          <em class="for">${esc([...it.meals].slice(0, 4).join(', '))}${it.meals.size > 4 ? ` +${it.meals.size - 4}` : ''}</em></span></label>`;
       }).join('')
     }</div>`).join('');
 
   el('shopping-list').querySelectorAll('input[type=checkbox]').forEach((box) => {
     box.addEventListener('change', () => {
       box.closest('label').classList.toggle('done', box.checked);
-      const key = 'wt-shopping-' + todayISO();
+      const key = `wt-shopping-${todayISO()}-${shopDays}`;
       const state = JSON.parse(localStorage.getItem(key) || '{}');
       state[box.id] = box.checked;
       localStorage.setItem(key, JSON.stringify(state));
@@ -671,7 +867,13 @@ async function renderScorecard() {
 
 /* --- shell ---------------------------------------------------------------- */
 
-const VIEWS = { today: renderToday, progress: renderProgress, recipes: renderRecipes, shopping: renderShopping, scorecard: renderScorecard };
+const VIEWS = {
+  today: renderToday,
+  plan: renderPlan,
+  recipes: renderRecipes,
+  shopping: renderShopping,
+  progress: async () => { await renderScorecard(); await renderProgress(); },
+};
 
 function show(name) {
   for (const key of Object.keys(VIEWS)) el(`view-${key}`).hidden = key !== name;
@@ -684,6 +886,19 @@ document.querySelectorAll('nav button').forEach((b) =>
   b.addEventListener('click', () => { show(b.dataset.view); TG?.HapticFeedback?.selectionChanged?.(); }));
 
 el('recipe-search').addEventListener('input', (e) => drawRecipes(e.target.value));
+
+function wireSegment(id, onPick) {
+  el(id).addEventListener('click', (e) => {
+    const btn = e.target.closest('button');
+    if (!btn) return;
+    el(id).querySelectorAll('button').forEach((b) =>
+      b.setAttribute('aria-pressed', String(b === btn)));
+    TG?.HapticFeedback?.selectionChanged?.();
+    onPick(Number(btn.dataset.days));
+  });
+}
+wireSegment('plan-range', (d) => { planDays = d; renderPlan(); });
+wireSegment('shop-range', (d) => { shopDays = d; renderShopping(); });
 
 /* Telegram theme — fall back to the CSS defaults outside Telegram */
 function applyTheme() {
