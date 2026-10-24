@@ -878,21 +878,14 @@ async function renderBatch() {
     </div>`;
   }).join('');
 
-  // Tap a meal to see what is in it and how to make it
-  el('plan-days').querySelectorAll('.slotline.tappable').forEach((row) => {
-    row.addEventListener('click', () => {
-      const detail = row.nextElementSibling;
-      if (!detail?.classList.contains('slotdetail')) return;
-      detail.hidden = !detail.hidden;
-      row.classList.toggle('open', !detail.hidden);
-      TG?.HapticFeedback?.selectionChanged?.();
-    });
-  });
 }
 
 let planDays = 7;
 
 async function renderPlan() {
+  // Deliberately not awaited: the batch card fills in beside the days.
+  // It must never touch #plan-days — binding there twice makes every tap a
+  // double toggle, which looks exactly like a dead button.
   renderBatch();
   const start = todayISO();
   const days = await planRange(start, planDays);
