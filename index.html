@@ -123,6 +123,14 @@
   details.sub-recipe { margin-top: 12px; padding: 10px 12px; border-radius: 10px;
                        background: var(--bg); box-shadow: inset 0 0 0 1px var(--border); }
   details.sub-recipe summary { cursor: pointer; font-weight: 600; font-size: 13px; }
+  details.sub-recipe.stocked summary { color: var(--ok); }
+  details.sub-recipe.todo summary { color: var(--warn); }
+  .jarbtn { margin-top: 10px; border: 0; border-radius: 9px; padding: 9px 14px; cursor: pointer;
+            background: var(--button); color: var(--button-text); font: 600 13px/1 inherit; }
+  .prepflag { font-size: 11px; margin-left: 5px; }
+  .prepbox { background: var(--bg); box-shadow: inset 0 0 0 1px var(--border);
+             border-radius: 10px; padding: 9px 12px; margin-bottom: 10px; font-size: 13px; }
+  .prepbox ul { margin: 5px 0 0; padding-left: 18px; }
   .batch .row + .row { margin-top: 2px; }
   .batch ol { margin: 10px 0 0; padding-left: 20px; font-size: 13.5px; }
   .batch ol li { margin-bottom: 5px; }
@@ -726,6 +734,11 @@ const DAY_META = [
  */
 async function planRange(start, days) {
   const recipes = await allRecipes();
+  const jars = await tryRows('wt_prepared_items?select=recipe_id,expires_on,remaining') || [];
+  let prepTasksFor, stockFor;
+  try {
+    ({ prepTasksFor, stockFor } = await import('./batchplan.js'));
+  } catch { /* badges are a nicety, not a requirement */ }
   const end = addDays(start, days - 1);
   const rows = await tryRows(
     `wt_coach_daily_plan?select=date,slot,recipe_id,recipe_title,portion,note` +
@@ -740,12 +753,22 @@ async function planRange(start, days) {
   for (const row of rows) {
     const recipe = (row.recipe_id && byId.get(row.recipe_id)) ||
                    byTitle.get((row.recipe_title || '').toLowerCase()) || null;
+    // Flag what needs doing before this meal can be made
+    let prep = [];
+    if (recipe && prepTasksFor) {
+      const byTitleAll = new Map(recipes.map((r) => [r.title.toLowerCase(), r]));
+      const inStock = new Set(
+        jars.filter((j) => Number(j.remaining) > 0 && j.expires_on >= todayISO())
+            .map((j) => j.recipe_id));
+      prep = prepTasksFor(recipe, byTitleAll, inStock);
+    }
     const entry = {
       slot: row.slot,
       title: row.recipe_title,
       portion: Number(row.portion) || 1,
       note: row.note,
       recipe,
+      prep,
     };
     if (!byDate.has(row.date)) byDate.set(row.date, []);
     byDate.get(row.date).push(entry);
@@ -789,8 +812,10 @@ async function renderBatch() {
   const rows = await tryRows(
     `wt_coach_daily_plan?select=date,slot,recipe_id,recipe_title,portion` +
     `&date=gte.${todayISO()}&date=lte.${addDays(todayISO(), 20)}&order=date`) || [];
+  const jars = await tryRows(
+    'wt_prepared_items?select=recipe_id,made_on,expires_on,remaining') || [];
 
-  const sessions = upcomingSessions(recipes, rows, todayISO(), 2);
+  const sessions = upcomingSessions(recipes, rows, todayISO(), 2, jars);
 
   host.innerHTML = sessions.map((s) => {
     if (s.empty) {
@@ -808,11 +833,17 @@ async function renderBatch() {
       </div>
       <div class="macros">Hands-on ~${s.handsOn} min · in the kitchen ~${s.elapsed} min · ${s.totalPortions} portions</div>
 
-      ${s.marinades.length ? `<div class="item"><strong>Marinades first</strong>
-        <div class="m">Make these before anything else — they keep in a jar all week</div>
-        ${s.marinades.map((m) => `<details class="sub-recipe">
-          <summary>${esc(m.title)} <span class="unit">· ${m.prep_time_min || 5} min · makes ${m.servings}</span></summary>
-          ${ingredientList(m, 1)}${methodList(m)}
+      ${s.marinadeJobs?.length ? `<div class="item"><strong>Jars</strong>
+        <div class="m">Marinades keep for a week or two, so these are only made when stock runs out</div>
+        ${s.marinadeJobs.map((j) => `<details class="sub-recipe${j.makeJar ? ' todo' : ' stocked'}"
+            data-marinade="${j.marinade.id}" data-days="${j.keepsDays}">
+          <summary>${j.makeJar ? '🫙 Make' : '✓ In the fridge'} — ${esc(j.marinade.title)}
+            <span class="unit">· ${j.makeJar
+              ? `${j.jarsToMake} jar${j.jarsToMake > 1 ? 's' : ''} of ${j.perJar}, keeps ${j.keepsDays} days`
+              : `${j.stock.remaining} left, use by ${j.stock.expiresOn}`}</span></summary>
+          <div class="m" style="margin-bottom:6px">For ${esc(j.usedBy.join(', '))} · this window needs about ${j.needed}</div>
+          ${ingredientList(j.marinade, Math.max(1, j.jarsToMake || 1))}${methodList(j.marinade)}
+          ${j.makeJar ? `<button class="jarbtn" data-id="${j.marinade.id}" data-days="${j.keepsDays}">Made a jar</button>` : ''}
         </details>`).join('')}
       </div>` : ''}
 
@@ -844,20 +875,20 @@ async function renderBatch() {
         </div>`).join('')}
       </div>` : ''}
 
-      ${s.nothingToPrep?.length ? `<div class="fresh" style="color:var(--text)">
-        <strong>Cooked on the day</strong>
-        <span class="unit"> · nothing to prep ahead, but here is the work</span>
-        ${s.nothingToPrep.map((f) => `<details class="sub-recipe">
-          <summary>${esc(f.title)} <span class="unit">· ${esc(f.days.join(', '))} · ${
-            f.prepMin} min prep${f.cookMin ? ` + ${f.cookMin} min cook` : ''}</span></summary>
-          ${recipeDetail(f.recipe, 1)}
-        </details>`).join('')}
-      </div>` : ''}
     </div>`;
   }).join('');
-}
 
-/* --- the Plan tab -------------------------------------------------------- */
+  // Tap a meal to see what is in it and how to make it
+  el('plan-days').querySelectorAll('.slotline.tappable').forEach((row) => {
+    row.addEventListener('click', () => {
+      const detail = row.nextElementSibling;
+      if (!detail?.classList.contains('slotdetail')) return;
+      detail.hidden = !detail.hidden;
+      row.classList.toggle('open', !detail.hidden);
+      TG?.HapticFeedback?.selectionChanged?.();
+    });
+  });
+}
 
 let planDays = 7;
 
@@ -888,10 +919,20 @@ async function renderPlan() {
         <div class="slotline${e.recipe ? ' tappable' : ''}" data-day="${d.date}" data-i="${idx}">
           <span class="s">${e.slot}</span>
           <span class="t">${esc(e.title)}${e.portion !== 1 ? ` <span class="unit">×${e.portion}</span>` : ''}
+            ${(e.prep || []).map((t) => `<span class="prepflag" title="${esc(t.text)}">${
+              t.kind === 'marinade' ? '🫙' : t.kind === 'marinate' ? '🧂'
+              : t.kind === 'grain' ? '🍚' : '🔪'}</span>`).join('')}
             ${e.note ? `<div class="unit" style="font-size:11.5px">${esc(e.note)}</div>` : ''}</span>
           <span class="m">${e.recipe ? Math.round((e.recipe.calories_per_serving || 0) * e.portion) + ' kcal' : '—'}</span>
         </div>
-        ${e.recipe ? `<div class="slotdetail" hidden>${recipeDetail(e.recipe, e.portion)}</div>` : ''}`).join('')}
+        ${e.recipe ? `<div class="slotdetail" hidden>
+          ${(e.prep || []).length ? `<div class="prepbox"><strong>Prep before this</strong><ul>${
+            e.prep.map((t) => `<li>${esc(t.text)}${
+              t.marinade ? `<details class="sub-recipe"><summary>${esc(t.marinade.title)}</summary>
+                ${ingredientList(t.marinade, 1)}${methodList(t.marinade)}</details>` : ''}</li>`).join('')
+          }</ul></div>` : ''}
+          ${recipeDetail(e.recipe, e.portion)}
+        </div>` : ''}`).join('')}
       </div>`;
   }).join('');
 

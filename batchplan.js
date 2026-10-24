@@ -70,6 +70,37 @@ function marinadesFor(recipe, byTitle) {
 }
 
 
+
+/**
+ * How long a jar keeps in the fridge, taken from each marinade's own storage
+ * line. Fresh herbs and raw alliums are the limit, not the sugar or acid.
+ */
+export const SHELF_LIFE_DAYS = {
+  "jerk marinade": 14,
+  "honey garlic marinade": 14,
+  "sofrito base": 7,
+  "lemon herb marinade": 7,
+};
+export const DEFAULT_SHELF_LIFE = 7;
+
+export const shelfLife = (recipe) =>
+  SHELF_LIFE_DAYS[(recipe.title || "").toLowerCase()] ?? DEFAULT_SHELF_LIFE;
+
+/**
+ * What is in the jars right now.
+ * @param pantry rows of { recipe_id, made_on, expires_on, remaining }
+ */
+export function stockFor(recipeId, pantry, onDate) {
+  const live = (pantry || []).filter(
+    (j) => j.recipe_id === recipeId &&
+           Number(j.remaining) > 0 &&
+           j.expires_on >= onDate);
+  if (!live.length) return null;
+  const total = live.reduce((a, j) => a + Number(j.remaining), 0);
+  const soonest = live.map((j) => j.expires_on).sort()[0];
+  return { remaining: Math.round(total * 10) / 10, expiresOn: soonest, jars: live.length };
+}
+
 /**
  * Components of a fresh meal that can still be done in advance.
  *
@@ -88,13 +119,24 @@ const NOT_PRODUCE = /\b(powder|dried|ground|flakes?|seasoning|salt|puree|sauce|s
 
 const PROTEIN = /\b(chicken|salmon|turkey|beef|mince|prawn|mackerel|tuna)\b/i;
 
-export function prepTasksFor(recipe, byTitle) {
+export function prepTasksFor(recipe, byTitle, inStock = new Set()) {
   const tasks = [];
   const ings = recipe.ingredients || [];
 
   const marinades = marinadesFor(recipe, byTitle);
   const protein = ings.find((i) => PROTEIN.test(i.item || ""));
   for (const m of marinades) {
+    if (inStock.has(m.id)) {
+      tasks.push({
+        kind: "marinate",
+        marinade: m,
+        text: protein
+          ? `Take the ${m.title} out of the fridge and marinate the ${String(protein.item).split(",")[0].toLowerCase()}`
+          : `Use the ${m.title} from the fridge`,
+        minutes: 5,
+      });
+      continue;
+    }
     tasks.push({
       kind: "marinade",
       marinade: m,
@@ -135,7 +177,7 @@ export function prepTasksFor(recipe, byTitle) {
  * @param cookDate ISO date of the cook session itself
  * @param session  one of SESSIONS
  */
-export function buildSession(recipes, planRows, cookDate, session) {
+export function buildSession(recipes, planRows, cookDate, session, pantry = []) {
   const byId = new Map(recipes.map((r) => [r.id, r]));
   const byTitle = new Map(recipes.map((r) => [r.title.toLowerCase(), r]));
 
@@ -182,13 +224,57 @@ export function buildSession(recipes, planRows, cookDate, session) {
     // Longest cook first: start it, then prep everything else while it runs
     .sort((a, b) => b.cookMin - a.cookMin);
 
-  // Marinades must exist before the things that use them
-  const marinades = [];
-  for (const it of items) {
-    for (const m of marinadesFor(it.recipe, byTitle)) {
-      if (!marinades.some((x) => x.id === m.id)) marinades.push(m);
+  // Marinade demand is per cook, not per planned day: one tray of thighs needs
+  // one lot of marinade however many days it then feeds.
+  const batchedIds0 = new Set(items.map((i) => i.recipe.id));
+  const demand = new Map();
+
+  const addDemand = (recipe, lots) => {
+    for (const m of marinadesFor(recipe, byTitle)) {
+      const line = (recipe.ingredients || []).find((i) =>
+        new RegExp(`\\(see ${m.title}\\)`, "i").test(i.item || ""));
+      const perLot = Number(line?.quantity) || 2;
+      const prev = demand.get(m.id) || { marinade: m, needed: 0, usedBy: new Set() };
+      prev.needed += perLot * lots;
+      prev.usedBy.add(recipe.title);
+      demand.set(m.id, prev);
     }
+  };
+
+  // Cooked ahead: one lot per batch
+  for (const it of items) addDemand(it.recipe, it.batches);
+
+  // Cooked fresh: one lot each time it is made
+  const freshCounts = new Map();
+  for (const row of inWindow) {
+    const recipe = (row.recipe_id && byId.get(row.recipe_id)) ||
+                   byTitle.get((row.recipe_title || "").toLowerCase());
+    if (!recipe || batchedIds0.has(recipe.id)) continue;
+    freshCounts.set(recipe, (freshCounts.get(recipe) || 0) + 1);
   }
+  for (const [recipe, times] of freshCounts) addDemand(recipe, times);
+
+  // Only ask for a jar when there is not one already, or not enough left
+  const marinadeJobs = [...demand.values()].map((d) => {
+    const stock = stockFor(d.marinade.id, pantry, cookDate);
+    const have = stock?.remaining ?? 0;
+    const short = Math.max(0, d.needed - have);
+    const perJar = d.marinade.servings || 8;
+    return {
+      marinade: d.marinade,
+      needed: Math.round(d.needed * 10) / 10,
+      have,
+      stock,
+      jarsToMake: short > 0 ? Math.ceil(short / perJar) : 0,
+      perJar,
+      usedBy: [...d.usedBy],
+      makeJar: short > 0,
+      keepsDays: shelfLife(d.marinade),
+    };
+  });
+
+  const marinades = marinadeJobs.filter((j) => j.makeJar).map((j) => j.marinade);
+  const marinadesInStock = marinadeJobs.filter((j) => !j.makeJar);
 
   const handsOn = marinades.reduce((a, m) => a + (m.prep_time_min || 0), 0) +
                   items.reduce((a, i) => a + i.prepMin, 0);
@@ -216,6 +302,7 @@ export function buildSession(recipes, planRows, cookDate, session) {
   // Everything in the window that is not a full cook-ahead batch, with
   // whatever can still be done in advance for it.
   const batchedIds = new Set(items.map((i) => i.recipe.id));
+  const inStockIds = new Set(marinadesInStock.map((j) => j.marinade.id));
   const freshSeen = new Map();
   for (const row of inWindow) {
     const recipe = (row.recipe_id && byId.get(row.recipe_id)) ||
@@ -228,7 +315,7 @@ export function buildSession(recipes, planRows, cookDate, session) {
       slots: new Set(),
       prepMin: recipe.prep_time_min || 0,
       cookMin: recipe.cook_time_min || 0,
-      tasks: prepTasksFor(recipe, byTitle),
+      tasks: prepTasksFor(recipe, byTitle, inStockIds),
     };
     prev.days.add(dayName(row.date));
     prev.slots.add(row.slot);
@@ -250,6 +337,8 @@ export function buildSession(recipes, planRows, cookDate, session) {
     nothingToPrep,
     freshOnTheDay,
     prepMinutes,
+    marinadeJobs,
+    marinadesInStock,
     cookDay: dayName(cookDate),
     coversLabel: session.coversLabel,
     windowDates,
@@ -264,10 +353,10 @@ export function buildSession(recipes, planRows, cookDate, session) {
 }
 
 /** The next `count` cook sessions on or after `from`. */
-export function upcomingSessions(recipes, planRows, from, count = 2) {
+export function upcomingSessions(recipes, planRows, from, count = 2, pantry = []) {
   return SESSIONS
     .map((s) => ({ s, date: nextCookDate(from, s.cookDay) }))
     .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, count)
-    .map(({ s, date }) => buildSession(recipes, planRows, date, s));
+    .map(({ s, date }) => buildSession(recipes, planRows, date, s, pantry));
 }
