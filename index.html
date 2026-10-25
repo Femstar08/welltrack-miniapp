@@ -1457,6 +1457,9 @@ async function renderShopping() {
 
   // What the marinade's own line should read instead of a tbsp total.
   const jarLine = new Map();
+  // Dishes you could not have worked out for yourself — these go first on the
+  // "for" line, because "spring onion, +4 more" hides the only answer you need.
+  const subTitles = new Set();
   for (const need of subNeed.values()) {
     const short = Math.max(0, need.qty - (jarStock.get(need.sub.id) || 0));
     const perJar = need.sub.servings || 8;
@@ -1466,11 +1469,10 @@ async function renderShopping() {
     // for its ingredients as well.
     if (!toMake) continue;
     const dishes = [...need.dishes];
-    meals.push({
-      recipe: need.sub, portion: toMake, wholeBatch: true,
-      title: `${need.sub.title} (${dishes.slice(0, 2).join(', ')}` +
-             `${dishes.length > 2 ? ` +${dishes.length - 2}` : ''})`,
-    });
+    const title = `${need.sub.title} (${dishes.slice(0, 2).join(', ')}` +
+                  `${dishes.length > 2 ? ` +${dishes.length - 2}` : ''})`;
+    subTitles.add(title);
+    meals.push({ recipe: need.sub, portion: toMake, wholeBatch: true, title });
   }
 
   // Recipes list quantities for the whole batch, so a 1000g/5-serving tray is
@@ -1537,6 +1539,7 @@ async function renderShopping() {
             ? [...units.entries()].map(([u, n]) => `${fmt(n, u)}${u ? ' ' + u : ''}`).join(' + ')
             : '');
           const dishes = [...it.dishes.entries()]
+            .sort((a, b) => (subTitles.has(b[0]) ? 1 : 0) - (subTitles.has(a[0]) ? 1 : 0))
             .map(([t, n]) => n > 1 ? `${t} ×${n}` : t);
           const forLine = dishes.slice(0, 2).join(', ') +
             (dishes.length > 2 ? ` +${dishes.length - 2} more` : '');
