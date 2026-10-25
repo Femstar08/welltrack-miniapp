@@ -1386,22 +1386,34 @@ function ingredientAisle(name) {
 }
 
 async function renderShopping() {
+  await allRecipes();
   let meals = [];
+  // Plan rows the library cannot answer for. Dropping them silently is how a
+  // shopping list ends up short without saying so.
+  const gaps = [];
 
   // Every line has to say which dish it is for — "stewed beef offal" means
   // nothing until you know it is the Nigerian Breakfast Plate — so the recipe
   // title travels with the ingredient, not just the day.
   if (shopDays === 1) {
     const plan = await todaysPlan();
-    meals = (plan || []).filter((p) => p.recipe)
-      .map((p) => ({ recipe: p.recipe, portion: p.portion || 1, title: p.recipe.title, when: 'Today' }));
+    for (const p of plan || []) {
+      if (!p.recipe) continue;
+      if (!(p.recipe.ingredients || []).length) { gaps.push(p.recipe.title); continue; }
+      meals.push({ recipe: p.recipe, portion: p.portion || 1, title: p.recipe.title, when: 'Today' });
+    }
     el('shopping-sub').textContent = meals.length
       ? `For today's ${meals.length} meals`
       : 'Nothing planned for today';
   } else {
     const days = await planRange(todayISO(), shopDays);
-    meals = days.flatMap((d) => d.entries.filter((e) => e.recipe)
-      .map((e) => ({ recipe: e.recipe, portion: e.portion, title: e.recipe.title, when: dayLabel(d.date) })));
+    for (const d of days) {
+      for (const e of d.entries) {
+        const name = e.recipe?.title || e.title;
+        if (!e.recipe || !(e.recipe.ingredients || []).length) { if (name) gaps.push(name); continue; }
+        meals.push({ recipe: e.recipe, portion: e.portion, title: e.recipe.title, when: dayLabel(d.date) });
+      }
+    }
     el('shopping-sub').textContent = days.length
       ? `For ${days.length} planned days — ${meals.length} meals`
       : `Nothing planned for the next ${shopDays} days`;
@@ -1413,12 +1425,60 @@ async function renderShopping() {
     return;
   }
 
+  /* A recipe can ask for something that is itself a recipe — "4 tbsp jerk
+     marinade (see Jerk Marinade)". Left at that, the list says "jerk marinade"
+     and never mentions the spring onions, scotch bonnet or allspice that go in
+     it. Marinades are made a jar at a time, so demand is summed in tbsp,
+     turned into whole jars against what is already in the fridge, and the
+     jar's own ingredients join the list named for the dish that needs them. */
+  const jarRows = await tryRows(
+    'wt_prepared_items?select=recipe_id,expires_on,remaining') || [];
+  const jarStock = new Map(jarRows
+    .filter((j) => Number(j.remaining) > 0 && j.expires_on >= todayISO())
+    .map((j) => [j.recipe_id, Number(j.remaining)]));
+
+  const byTitle = new Map(RECIPES.map((r) => [r.title.toLowerCase(), r]));
+  const subNeed = new Map();
+  for (const { recipe, portion, title } of meals) {
+    const serves = recipe.servings || 1;
+    for (const g of recipe.ingredients || []) {
+      const ref = /\(see ([^)]+)\)/i.exec(g.item || '');
+      const sub = ref && byTitle.get(ref[1].trim().toLowerCase());
+      if (!sub) continue;
+      const prev = subNeed.get(sub.id) || {
+        sub, qty: 0, dishes: new Set(),
+        key: ingredientKey((g.item || '').replace(/,.*$/, '').trim()),
+      };
+      prev.qty += (Number(g.quantity) || 0) / serves * portion;
+      prev.dishes.add(title);
+      subNeed.set(sub.id, prev);
+    }
+  }
+
+  // What the marinade's own line should read instead of a tbsp total.
+  const jarLine = new Map();
+  for (const need of subNeed.values()) {
+    const short = Math.max(0, need.qty - (jarStock.get(need.sub.id) || 0));
+    const perJar = need.sub.servings || 8;
+    const toMake = short > 0 ? Math.ceil(short / perJar) : 0;
+    jarLine.set(need.key, toMake ? `${toMake} jar${toMake > 1 ? 's' : ''}` : 'in the fridge');
+    // The Plan tab already says this one is in the fridge; don't send him out
+    // for its ingredients as well.
+    if (!toMake) continue;
+    const dishes = [...need.dishes];
+    meals.push({
+      recipe: need.sub, portion: toMake, wholeBatch: true,
+      title: `${need.sub.title} (${dishes.slice(0, 2).join(', ')}` +
+             `${dishes.length > 2 ? ` +${dishes.length - 2}` : ''})`,
+    });
+  }
+
   // Recipes list quantities for the whole batch, so a 1000g/5-serving tray is
   // 200g for one plate. Everything is reduced to per-serving before scaling by
   // the portion the plan calls for.
   const items = new Map();
-  for (const { recipe, portion, title } of meals) {
-    const serves = recipe.servings || 1;
+  for (const { recipe, portion, title, wholeBatch } of meals) {
+    const serves = wholeBatch ? 1 : (recipe.servings || 1);
     for (const g of recipe.ingredients || []) {
       const full = (g.item || '').trim();
       const name = full.replace(/,.*$/, '').trim();
@@ -1473,9 +1533,9 @@ async function renderShopping() {
           // wording change does not orphan everything already ticked off.
           const id = 's-' + btoa(unescape(encodeURIComponent(it.key))).replace(/=/g, '');
           const units = foldSpoons(it.units);
-          const qty = units.size
+          const qty = jarLine.get(it.key) || (units.size
             ? [...units.entries()].map(([u, n]) => `${fmt(n, u)}${u ? ' ' + u : ''}`).join(' + ')
-            : '';
+            : '');
           const dishes = [...it.dishes.entries()]
             .map(([t, n]) => n > 1 ? `${t} ×${n}` : t);
           const forLine = dishes.slice(0, 2).join(', ') +
@@ -1493,6 +1553,15 @@ async function renderShopping() {
         }).join('')}
       </div>`;
     }).join('');
+
+  // Say what the list could not account for rather than quietly running short.
+  if (gaps.length) {
+    const names = [...new Set(gaps)];
+    el('shopping-list').insertAdjacentHTML('beforeend',
+      `<p class="caption m-muted" style="margin-top:12px">Not on this list: ` +
+      `${names.map(esc).join(', ')} — no ingredients recorded for ` +
+      `${names.length > 1 ? 'those' : 'that'} yet.</p>`);
+  }
 
   el('shopping-list').querySelectorAll('.m-ing').forEach((box) => {
     box.addEventListener('click', () => {
